@@ -7,6 +7,9 @@
 
 > 当前版本：`0.2.0`（新增首屏快扫，Web / Desktop profile 均可用）
 
+[![GitHub](https://img.shields.io/badge/GitHub-TWFU--wcy%2Fdsh--scroll--boost-181717?logo=github)](https://github.com/TWFU-wcy/dsh-scroll-boost)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ## 解决什么问题
 
 安装 `@changfenhuang/dsh-genui` 等会在 DOM 中生成大量围栏内容的插件后，长会话滚动可能出现掉帧。
@@ -29,21 +32,27 @@
 
 ## 安装
 
-### 方式一：本地目录（推荐开发时）
+> 安装后必须**完全退出并重启 DSH**（不是只刷新页面）。插件通过 `package.json` 的
+> `dsh.bundle.patch` 和 `dsh.client` 自动挂载；host 端入口是空实现，实际逻辑在 `lib/client.js`。
+
+### 方式一：从 GitHub 直接安装
 
 ```powershell
-dsh plugin --profile desktop add "D:\Project\dsh-scroll-boost"
+dsh plugin --profile desktop add "github:TWFU-wcy/dsh-scroll-boost"
 ```
 
-然后**完全退出并重启 DSH**（不是只刷新页面）。插件通过 `package.json` 的 `dsh.bundle.patch`
-和 `dsh.client` 自动挂载；host 端入口是空实现，实际逻辑在 `lib/client.js`。
-
-### 方式二：打包后安装
+### 方式二：本地目录（开发时）
 
 ```powershell
-cd "D:\Project\dsh-scroll-boost"
+git clone https://github.com/TWFU-wcy/dsh-scroll-boost.git
+dsh plugin --profile desktop add ".\dsh-scroll-boost"
+```
+
+### 方式三：打包后安装
+
+```powershell
 npm pack
-dsh plugin --profile desktop add ".\dsh-scroll-boost-0.1.0.tgz"
+dsh plugin --profile desktop add ".\dsh-scroll-boost-0.2.0.tgz"
 ```
 
 ### 安装后确认
