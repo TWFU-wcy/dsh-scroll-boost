@@ -17,7 +17,13 @@
 
 `dsh-scroll-boost` 的做法是：**只让屏幕外的“行”不参与渲染**，屏幕内的画面完全不变。
 
-## 四层优化
+## 运行架构
+
+![dsh-scroll-boost 运行架构](docs/architecture.png)
+
+点击查看[可交互版本](docs/architecture.html)（可切换主题、搜索节点、查看源码引用）。
+
+## 优化分层（A–E）
 
 | 层 | 做什么 | 关键点 |
 | --- | --- | --- |
