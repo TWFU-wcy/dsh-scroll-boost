@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Scroll Boost">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f6feb"/>
+      <stop offset="1" stop-color="#0b2a5b"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd66b"/>
+      <stop offset="1" stop-color="#ff9f2e"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-width="2.4" opacity="0.55">
+    <path d="M13 21h15"/>
+    <path d="M13 30h9"/>
+    <path d="M13 39h15"/>
+    <path d="M13 48h9"/>
+  </g>
+  <path d="M40.6 10.5 26 35.2h8.6L31.9 53.5 47 28.2h-8.7z"
+        fill="url(#bolt)" stroke="#7a3f00" stroke-width="1.1" stroke-linejoin="round"/>
+</svg>

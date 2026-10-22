@@ -5,7 +5,7 @@
 它不卸载插件、不改 React 组件、不改主题，也不降低画面质量：只在空闲时给「真正可滚动容器里的长列表直接子行」加上
 `content-visibility: auto`，让浏览器跳过屏幕外行的布局与绘制，从而减少滚动时的合成和重排压力。
 
-> 当前版本：`0.2.0`（新增首屏快扫，Web / Desktop profile 均可用）
+> 当前版本：`0.2.1`（新增插件简介与图标，Web / Desktop profile 均可用）
 
 [![GitHub](https://img.shields.io/badge/GitHub-TWFU--wcy%2Fdsh--scroll--boost-181717?logo=github)](https://github.com/TWFU-wcy/dsh-scroll-boost)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -58,7 +58,7 @@ dsh plugin --profile desktop add ".\dsh-scroll-boost"
 
 ```powershell
 npm pack
-dsh plugin --profile desktop add ".\dsh-scroll-boost-0.2.0.tgz"
+dsh plugin --profile desktop add ".\dsh-scroll-boost-0.2.1.tgz"
 ```
 
 ### 安装后确认
@@ -77,7 +77,7 @@ window.__scrollBoost.report()
 
 ```js
 {
-  version: "0.2.0",
+  version: "0.2.1",
   enabled: true,
   containers: 3,
   hinted: 3,
@@ -102,6 +102,14 @@ window.__scrollBoost.enable();   // 重新启用
 window.__scrollBoost.scanNow();  // 手动触发一次空闲扫描
 window.__scrollBoost.destroy();  // 彻底卸载当前实例
 ```
+
+## 插件简介与图标
+
+DSH 的插件列表从 `locale/<语言>.json` 读取显示文案（`meta.title` / `meta.description`），
+缺失时回退到 `package.json` 的 `name` / `description`；图标取自 `package.json` 的 `icon` 字段。
+
+本插件提供 `locale/en.json` 与 `locale/zh.json`，中文界面下显示为「滚动加速」及对应说明；
+`icon.svg` 为 873 B 的矢量图标，位于包内。修改文案后需要**完全重启 DSH** 才会重新读取。
 
 ## 验收建议
 
@@ -135,7 +143,8 @@ npm install
 npm test
 ```
 
-`npm test` 会做语法检查并运行 jsdom 冒烟测试（20 行列表、新增行、disable/enable、cleanup）。
+`npm test` 会做语法检查、插件元信息检查（`locale` 字典与 `icon` 约束）并运行 jsdom 冒烟测试
+（20 行列表、新增行、disable/enable、cleanup）。
 
 ## 卸载
 
