@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>scroll-boost-harness</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  main { display: block; }
+  #list { height: 600px; overflow-y: auto; border: 1px solid #333; }
+  #wrapper { display: block; }
+  .row { height: 100px; box-sizing: border-box; border-bottom: 1px solid #ddd; }
+  .layout { height: 700px; background: #fafafa; }
+</style>
+</head>
+<body>
+<main id="main">
+  <div class="layout" id="layout-a"></div>
+  <div class="layout" id="layout-b"></div>
+  <div id="list">
+    <div id="wrapper">
+      <div class="row">row 0</div>
+      <div class="row">row 1</div>
+      <div class="row">row 2</div>
+      <div class="row">row 3</div>
+      <div class="row">row 4</div>
+      <div class="row">row 5</div>
+      <div class="row">row 6</div>
+      <div class="row">row 7</div>
+      <div class="row">row 8</div>
+      <div class="row">row 9</div>
+      <div class="row">row 10</div>
+      <div class="row">row 11</div>
+      <div class="row">row 12</div>
+      <div class="row">row 13</div>
+      <div class="row">row 14</div>
+      <div class="row">row 15</div>
+      <div class="row">row 16</div>
+      <div class="row">row 17</div>
+      <div class="row">row 18</div>
+      <div class="row">row 19</div>
+    </div>
+  </div>
+</main>
+<script>
+  window.__ModuleLoader__ = {
+    load({ id, factory }) {
+      window.__plugin = factory(() => { throw new Error("unexpected require"); });
+      window.__pluginId = id;
+    }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  const listEl = document.getElementById("list");
+  const scrollHeightBefore = listEl.scrollHeight;
+  const markedCount = () => document.querySelectorAll(".row[data-scrollboost-row]").length;
+  const snapshots = [];
+  const t0 = performance.now();
+  const sample = () => {
+    snapshots.push({ at: Math.round(performance.now() - t0), marked: markedCount() });
+  };
+  window.__plugin.apply({ effect() {} });
+  [16, 50, 100, 200, 400, 800, 1200].forEach((ms) => setTimeout(sample, ms));
+  setTimeout(() => {
+    const report = window.__scrollBoost.report();
+    const rows = Array.from(document.querySelectorAll(".row"));
+    const marked = rows.filter((row) => row.hasAttribute("data-scrollboost-row"));
+    const heights = marked.map((row) => row.style.getPropertyValue("--sb-h"));
+    const result = {
+      report,
+      snapshots,
+      marked: marked.length,
+      heights: Array.from(new Set(heights)),
+      container: listEl.hasAttribute("data-scrollboost-container"),
+      layoutRows: document.querySelectorAll(".layout[data-scrollboost-row]").length,
+      firstRowHeight: rows[0].getBoundingClientRect().height,
+      contentVisibility: getComputedStyle(rows[0]).contentVisibility,
+      scrollHeightBefore,
+      scrollHeightAfter: listEl.scrollHeight
+    };
+    document.body.setAttribute("data-harness", JSON.stringify(result));
+  }, 1400);
+</script>
+</body>
+</html>

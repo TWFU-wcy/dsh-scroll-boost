@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>scroll-boost-harness-large</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  #list { height: 600px; overflow-y: auto; border: 1px solid #333; }
+  .row { height: 100px; box-sizing: border-box; border-bottom: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<main id="main">
+  <div id="list"><div id="wrapper"></div></div>
+</main>
+<script>
+  const wrapper = document.getElementById("wrapper");
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < 800; i++) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.textContent = "row " + i;
+    frag.appendChild(row);
+  }
+  wrapper.appendChild(frag);
+</script>
+<script>
+  window.__ModuleLoader__ = {
+    load({ id, factory }) {
+      window.__plugin = factory(() => { throw new Error("unexpected require"); });
+      window.__pluginId = id;
+    }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  const listEl = document.getElementById("list");
+  const rows = Array.from(document.querySelectorAll(".row"));
+  const t0 = performance.now();
+  const marks = [];
+  const snapshots = [];
+  let firstVisibleAt = null;
+  let firstAnyAt = null;
+
+  const sample = () => {
+    const at = Math.round(performance.now() - t0);
+    const marked = document.querySelectorAll(".row[data-scrollboost-row]").length;
+    const listRect = listEl.getBoundingClientRect();
+    let visibleMarked = 0;
+    for (const row of rows) {
+      if (!row.hasAttribute("data-scrollboost-row")) continue;
+      const r = row.getBoundingClientRect();
+      if (r.bottom > listRect.top && r.top < listRect.bottom) visibleMarked++;
+    }
+    if (marked > 0 && firstAnyAt === null) firstAnyAt = at;
+    if (visibleMarked >= 6 && firstVisibleAt === null) firstVisibleAt = at;
+    snapshots.push({ at, marked, visibleMarked });
+  };
+
+  window.__plugin.apply({ effect() {} });
+  const timers = [0, 8, 16, 32, 50, 80, 120, 200, 350, 600, 1000, 1600].map((ms) =>
+    setTimeout(sample, ms)
+  );
+
+  setTimeout(() => {
+    timers.forEach(clearTimeout);
+    sample();
+    const report = window.__scrollBoost.report();
+    const result = {
+      report,
+      firstAnyAt,
+      firstVisibleAt,
+      snapshots,
+      totalMarked: document.querySelectorAll(".row[data-scrollboost-row]").length,
+      scrollHeight: listEl.scrollHeight,
+      sampleHeights: Array.from(new Set(
+        rows.filter((r) => r.hasAttribute("data-scrollboost-row")).map((r) => r.style.getPropertyValue("--sb-h"))
+      ))
+    };
+    document.body.setAttribute("data-harness", JSON.stringify(result));
+  }, 1800);
+</script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+{
+  "name": "dsh-scroll-boost",
+  "version": "0.2.0",
+  "description": "Client-side scroll performance booster for the DeepSeek Harness web GUI: offscreen row skipping, compositor hints, idle scanning and incremental maintenance — no visual changes and no plugin removals.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "scroll",
+    "performance",
+    "content-visibility",
+    "dsh-plugin"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --check lib/index.js && node --check lib/client.js && node test/smoke.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.3"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "immediately": true,
+      "platform": "web"
+    },
+    "compatibility": {
+      "profiles": [
+        "web",
+        "desktop"
+      ]
+    }
+  }
+}

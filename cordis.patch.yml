@@ -1,0 +1,7 @@
+# dsh-scroll-boost bundle patch.
+# The host row is intentionally inert; it only mounts the package's
+# browser client entry declared under `dsh.client` in package.json.
+
+- insert:
+    - id: dsh-scroll-boost
+      name: dsh-scroll-boost
