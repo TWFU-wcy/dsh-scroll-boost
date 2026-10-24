@@ -1,6 +1,6 @@
 {
   "name": "dsh-scroll-boost",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Client-side scroll performance booster for the DeepSeek Harness web GUI: DSH-aware surface detection, offscreen row skipping with real height truth, compositor hints, idle scanning and incremental maintenance — no visual changes and no plugin removals.",
   "icon": "./icon.svg",
   "type": "module",
@@ -34,7 +34,7 @@
   },
   "scripts": {
     "test": "node --check lib/index.js && node --check lib/client.js && node test/meta.cjs && node test/regression.cjs && node test/smoke.cjs",
-    "test:browser": "node test/run-harness.cjs harness-chat.html && node test/run-harness.cjs probe-drift.html"
+    "test:browser": "node test/run-harness.cjs harness-chat.html && node test/run-harness.cjs probe-drift.html && node test/run-harness.cjs probe-traj-plugin.html"
   },
   "devDependencies": {
     "jsdom": "^30.1.3"

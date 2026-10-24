@@ -1,0 +1,304 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>probe-traj-plugin</title>
+<!--
+  Does the plugin's static rule actually reach DSH's trajectory table?
+
+  The real page replaces its <tr> nodes on every scroll frame, so a JS-written
+  attribute is gone before the frame paints. The plugin therefore ships a
+  static stylesheet rule instead. This fixture proves, on the real DOM shape:
+
+    1. the rule is present in the injected <style>;
+    2. `content-visibility` resolves to `auto` on the content cell of a normal
+       row, and stays `visible` on turn-start / boundary / request-only rows;
+    3. an offscreen row is actually skipped (checkVisibility);
+    4. row heights and scrollHeight are identical with and without the plugin;
+    5. per-frame script+layout cost drops while rows churn.
+
+  It also runs the same 60-frame churn twice: once before apply() (baseline)
+  and once after, so the comparison is not across two different page loads.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; }
+  .split { display: flex; position: relative; overflow: hidden; height: 640px; }
+  .tablePane { min-width: 0; flex: 1; position: relative; overflow: hidden auto; }
+  table.table { border-spacing: 0; table-layout: fixed; width: 100%; min-width: 0;
+    color: #111; background: #fff; font: 12px/16px system-ui, sans-serif; }
+  .eventColumn { width: 122px; }
+  table.table th { z-index: 3; box-sizing: border-box; border-bottom: .5px solid #ddd;
+    height: 30px; color: #888; background: #f6f7f9; text-align: left;
+    white-space: nowrap; padding: 0 8px; font-weight: 500; position: sticky; top: 0;
+    overflow: hidden; }
+  table.table td { box-sizing: border-box; border-bottom: .5px solid #eee;
+    text-overflow: ellipsis; white-space: nowrap; height: 30px; padding: 0 8px;
+    overflow: hidden; }
+  table.table .virtualSpacer td { height: var(--trajectory-virtual-spacer-height, 0px);
+    border: 0; padding: 0; }
+  table.table tbody tr[data-turn-start=true] td { position: relative; overflow: visible; }
+  table.table tbody tr[data-turn-start=true]:not(:first-child) td:before { z-index: 1;
+    background: #e5e7eb; content: ""; pointer-events: none; height: 2px;
+    position: absolute; top: 0; left: 0; right: 0; transform: translateY(-50%); }
+  .event { padding-left: 36px !important; padding-right: 4px !important; overflow: visible !important; }
+  .turnLabel { z-index: 3; box-sizing: border-box; width: max-content; color: #888;
+    background: #fff; font: 8px/10px ui-monospace, monospace; border-radius: 0 0 2px;
+    padding: 1px 5px; display: inline-grid; position: absolute; top: 0; left: 0; }
+  .requestBoundaryControl { --request-boundary-base-left: 12px; z-index: 6; top: -8px;
+    left: calc(var(--request-boundary-base-left) + var(--request-boundary-offset, 0px));
+    cursor: pointer; background: 0 0; border: 0; width: 16px; height: 16px; padding: 0;
+    position: absolute; }
+  .requestBoundaryControl:before { background: #999; width: 5px; height: 5px;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 3px transparent; content: ""; border-radius: 50%;
+    position: absolute; top: 5.5px; left: 5.5px; }
+  .turnRail, .selectionRail { background: #4c8dff; pointer-events: none; position: absolute; left: 0; }
+  .turnRail { z-index: 4; width: 2px; top: -1px; bottom: -1px; }
+  .selectionRail { z-index: 5; width: 3px; top: 0; bottom: 0; }
+  .eventInner { justify-content: flex-start; align-items: center; min-width: 0; height: 100%; display: flex; }
+  .kindSlot { flex: none; justify-content: flex-end; align-items: flex-end; width: 76px; display: flex; }
+  .kindTag { box-sizing: border-box; border-radius: 3px; flex: none; align-items: center;
+    height: 19px; padding: 0 5px; font-size: 10px; font-weight: 650; line-height: 16px;
+    display: inline-flex; color: #8a5a00; background: #fdf3d8; }
+  .contentText { text-overflow: ellipsis; white-space: nowrap; min-width: 0; display: block; overflow: hidden; }
+  .resultPreview { grid-template-columns: clamp(180px, 36cqw, 480px) minmax(0, 1fr);
+    align-items: center; gap: 8px; min-width: 0; display: grid; }
+  .resultRequest, .inlineResultText { text-overflow: ellipsis; white-space: nowrap; min-width: 0; overflow: hidden; }
+  table.table tbody tr[data-request-only=true] td { border-bottom: 0; height: 0; padding-top: 0; padding-bottom: 0; }
+  table.table tbody tr[data-terminal-request-boundary=true] td { height: 9px; }
+  table.table tbody tr[data-collapsed-summary] td { height: 24px; }
+  .tok-k { color: #a626a4; } .tok-s { color: #50a14f; } .tok-c { color: #a0a1a7; }
+  .tok-n { color: #986801; } .tok-f { color: #4078f2; }
+</style>
+</head>
+<body>
+<div class="split">
+  <div class="tablePane" data-trajectory-scroll id="pane">
+    <table class="table" data-scroll-ready="true">
+      <colgroup><col class="eventColumn"><col></colgroup>
+      <thead><tr><th>event</th><th>content</th></tr></thead>
+      <tbody id="tb"></tbody>
+    </table>
+  </div>
+</div>
+<script>
+  window.__ModuleLoader__ = {
+    load({ id, factory }) {
+      window.__plugin = factory(() => { throw new Error("unexpected require"); });
+      window.__pluginId = id;
+    }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  const pane = document.getElementById("pane");
+  const tb = document.getElementById("tb");
+  const ROW_H = 30, TOTAL = 2000, VISIBLE = 34, OVERSCAN = 12;
+  const KINDS = ["user", "assistant", "tool_call", "tool_result", "system"];
+  const TOKENS = [
+    ["const", "tok-k"], ["x", "tok-n"], ["=", ""], ["await", "tok-k"],
+    ["fetch", "tok-f"], ["(", ""], ['"/api/v1/records"', "tok-s"], [")", ""],
+    [";", ""], ["//", "tok-c"], ["fetch the page", "tok-c"], ["return", "tok-k"],
+    ["data", "tok-n"], [".", ""], ["map", "tok-f"], ["(", ""], ["r", "tok-n"],
+    ["=>", "tok-k"], ["r", "tok-n"], [".", ""], ["id", "tok-n"], [")", ""], [";", ""]
+  ];
+
+  function buildContent(td2, kind, index) {
+    if (kind === "tool_call" || kind === "tool_result") {
+      const prev = document.createElement("div");
+      prev.className = "resultPreview";
+      const a = document.createElement("span");
+      a.className = "resultRequest";
+      a.textContent = 'read_file(path="src/components/ChatView.tsx", offset=' + index + ")";
+      const b = document.createElement("span");
+      b.className = "inlineResultText";
+      b.textContent = "→ 1,240 lines · " + "x".repeat(40);
+      prev.append(a, b);
+      td2.appendChild(prev);
+      return;
+    }
+    const span = document.createElement("span");
+    span.className = "contentText";
+    // Rich content: a syntax-highlighted block is the expensive case.
+    for (let i = 0; i < 24; i++) {
+      const [text, cls] = TOKENS[i % TOKENS.length];
+      const s = document.createElement("span");
+      if (cls) s.className = cls;
+      s.textContent = text + " ";
+      span.appendChild(s);
+    }
+    td2.appendChild(span);
+  }
+
+  function buildRow(index) {
+    const tr = document.createElement("tr");
+    const isRequestOnly = index % 13 === 0;
+    const isBoundary = index % 11 === 0 && !isRequestOnly;
+    const isCollapsed = index % 17 === 0 && !isRequestOnly && !isBoundary;
+    const isTurnStart = index % 9 === 0;
+    if (!isRequestOnly && !isCollapsed) tr.setAttribute("data-record-index", String(index));
+    tr.setAttribute("data-trajectory-row-key", "k" + index);
+    if (isRequestOnly) tr.setAttribute("data-request-only", "true");
+    if (isBoundary) tr.setAttribute("data-terminal-request-boundary", "true");
+    if (isCollapsed) tr.setAttribute("data-collapsed-summary", "collapsed");
+    if (isTurnStart) tr.setAttribute("data-turn-start", "true");
+    const kind = KINDS[index % KINDS.length];
+
+    const td1 = document.createElement("td");
+    td1.className = "event";
+    if (isTurnStart) {
+      const btn = document.createElement("button");
+      btn.className = "requestBoundaryControl";
+      td1.appendChild(btn);
+    }
+    const rail = document.createElement("span");
+    rail.className = "turnRail";
+    const selRail = document.createElement("span");
+    selRail.className = "selectionRail";
+    const label = document.createElement("span");
+    label.className = "turnLabel";
+    label.textContent = "T" + Math.floor(index / 9);
+    const inner = document.createElement("div");
+    inner.className = "eventInner";
+    const slot = document.createElement("span");
+    slot.className = "kindSlot";
+    const tag = document.createElement("span");
+    tag.className = "kindTag";
+    tag.textContent = kind;
+    slot.appendChild(tag);
+    inner.appendChild(slot);
+    td1.append(rail, selRail, label, inner);
+
+    const td2 = document.createElement("td");
+    buildContent(td2, kind, index);
+    tr.append(td1, td2);
+    return tr;
+  }
+
+  function render(firstRow) {
+    const start = Math.max(0, firstRow - OVERSCAN);
+    const count = Math.min(TOTAL - start, VISIBLE + OVERSCAN * 2);
+    const frag = document.createDocumentFragment();
+    const top = document.createElement("tr");
+    top.className = "virtualSpacer";
+    top.setAttribute("data-virtual-spacer", "top");
+    const topTd = document.createElement("td");
+    topTd.colSpan = 2;
+    top.style.setProperty("--trajectory-virtual-spacer-height", (start * ROW_H) + "px");
+    top.appendChild(topTd);
+    frag.appendChild(top);
+    for (let i = start; i < start + count; i++) frag.appendChild(buildRow(i));
+    const bottom = document.createElement("tr");
+    bottom.className = "virtualSpacer";
+    bottom.setAttribute("data-virtual-spacer", "bottom");
+    const bottomTd = document.createElement("td");
+    bottomTd.colSpan = 2;
+    bottom.style.setProperty("--trajectory-virtual-spacer-height",
+      ((TOTAL - start - count) * ROW_H) + "px");
+    bottom.appendChild(bottomTd);
+    frag.appendChild(bottom);
+    tb.replaceChildren(frag);
+  }
+
+  function frame(firstRow) {
+    const t0 = performance.now();
+    render(firstRow);
+    void pane.scrollHeight;
+    return performance.now() - t0;
+  }
+
+  function churn(rounds) {
+    pane.scrollTop = 0;
+    frame(0);
+    const samples = [];
+    for (let r = 0; r < rounds; r++) samples.push(frame(400 + r * 7));
+    samples.sort((a, b) => a - b);
+    const at = (q) => samples[Math.min(samples.length - 1, Math.floor(q * samples.length))];
+    return {
+      workMedian: Math.round(at(0.5) * 100) / 100,
+      workP95: Math.round(at(0.95) * 100) / 100
+    };
+  }
+
+  function snapshot() {
+    pane.scrollTop = 0;
+    render(400);
+    const scrollHeight = pane.scrollHeight;
+    const heights = {};
+    for (const tr of Array.from(tb.querySelectorAll("tr"))) {
+      const key = tr.hasAttribute("data-request-only") ? "requestOnly"
+        : tr.hasAttribute("data-terminal-request-boundary") ? "boundary"
+        : tr.hasAttribute("data-collapsed-summary") ? "collapsed"
+        : tr.hasAttribute("data-virtual-spacer") ? "spacer" : "normal";
+      const h = Math.round(tr.getBoundingClientRect().height * 100) / 100;
+      (heights[key] ||= new Set()).add(h);
+    }
+    const out = {};
+    for (const k of Object.keys(heights)) out[k] = Array.from(heights[k]).sort((a, b) => a - b);
+
+    // A normal row (index 401) and special rows, all mounted at firstRow=400.
+    const normal = tb.querySelector('tr[data-record-index="401"]');
+    const turnStart = tb.querySelector('tr[data-turn-start="true"]');
+    const boundary = tb.querySelector('tr[data-terminal-request-boundary="true"]');
+    const requestOnly = tb.querySelector('tr[data-request-only="true"]');
+    const cvOf = (tr) => {
+      if (!tr) return null;
+      const td = tr.lastElementChild;
+      return td ? getComputedStyle(td).contentVisibility : null;
+    };
+    // Is an offscreen row really skipped?
+    const far = tb.querySelector('tr[data-record-index="425"]');
+    let farVisible = null;
+    if (far && typeof far.lastElementChild.checkVisibility === "function") {
+      farVisible = far.lastElementChild.checkVisibility({ contentVisibilityAuto: true });
+    }
+    return {
+      heights: out,
+      scrollHeight: pane.scrollHeight,
+      cvNormal: cvOf(normal),
+      cvTurnStart: cvOf(turnStart),
+      cvBoundary: cvOf(boundary),
+      cvRequestOnly: cvOf(requestOnly),
+      farContentVisible: farVisible,
+      styleHasRule: (() => {
+        const el = document.getElementById("dsh-scroll-boost-style");
+        return !!el && el.textContent.indexOf("data-trajectory-scroll") !== -1;
+      })()
+    };
+  }
+
+  // `?plain=1` renders the exact same page without the plugin. It exists so a
+  // screenshot of both variants can be diffed pixel by pixel: the static rule
+  // must not change a single pixel.
+  const PLAIN = new URLSearchParams(location.search).has("plain");
+
+  const before = { churn: churn(60), snap: snapshot() };
+
+  if (!PLAIN) window.__plugin.apply({ effect() {} });
+
+  // Let the first fast pass and idle scan settle before measuring again.
+  setTimeout(() => {
+    const after = { churn: churn(60), snap: snapshot() };
+    const report = PLAIN ? { version: null, surfaces: [] } : window.__scrollBoost.report();
+    const result = {
+      version: report.version,
+      before,
+      after,
+      delta: {
+        workMedian: Math.round((after.churn.workMedian - before.churn.workMedian) * 100) / 100,
+        workP95: Math.round((after.churn.workP95 - before.churn.workP95) * 100) / 100,
+        scrollHeight: after.snap.scrollHeight - before.snap.scrollHeight
+      },
+      surfaces: report.surfaces,
+      paneHinted: pane.hasAttribute("data-scrollboost-container"),
+      rowsMarked: document.querySelectorAll("[data-scrollboost-row]").length
+    };
+    // Park the viewport on the rendered band so a screenshot compares real
+    // rows instead of the top spacer.
+    render(400);
+    pane.scrollTop = (400 - OVERSCAN) * ROW_H;
+    document.body.setAttribute("data-harness", JSON.stringify(result));
+    fetch("/__result", { method: "POST", body: JSON.stringify(result) }).catch(() => {});
+  }, 900);
+</script>
+</body>
+</html>

@@ -5,7 +5,7 @@
 它不卸载插件、不改 React 组件、不改主题，也不降低画面质量：只在空闲时给「真正可滚动容器里的长列表直接子行」加上
 `content-visibility: auto`，让浏览器跳过屏幕外行的布局与绘制，从而减少滚动时的合成和重排压力。
 
-> 当前版本：`0.3.0`（识别 DSH 自身的界面结构：聊天流等表面直接接管，行高以真实高度为准）
+> 当前版本：`0.4.0`（识别 DSH 自身的界面结构：聊天流直接接管，轨迹表用静态规则覆盖，行高以真实高度为准）
 
 [![GitHub](https://img.shields.io/badge/GitHub-TWFU--wcy%2Fdsh--scroll--boost-181717?logo=github)](https://github.com/TWFU-wcy/dsh-scroll-boost)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -35,10 +35,39 @@
 | --- | --- | --- | --- |
 | `chat-flow` | `[data-slot="conversation.chat.flow"]` | 标记其直接子行 | 聊天记录没有虚拟化，行数随会话增长，是收益最大的地方 |
 | `conversation-scroll` | `[data-conversation-scroll]` | 只加 `will-change` 提示 | 这是真正的滚动口 |
-| `trajectory` | `[data-trajectory-scroll]` | **整面跳过** | DSH 自己做虚拟化，插手只会打架 |
+| `trajectory` | `[data-trajectory-scroll]` | 静态规则只跳内容单元格 | DSH 每帧重建行，JS 写的属性活不到绘制；见下节 |
 | `summary-region` | `[data-summary-scroll-region]` | 只加提示 | 摘要区是短列表，不需要跳行 |
 
 认不出来的界面仍走 0.2.x 的通用回退路径，所以版本升级不会让插件彻底失效。
+
+### 0.4.0：轨迹页为什么需要一条静态规则
+
+0.3.0 把轨迹页整个跳过了，理由是「DSH 自己做虚拟化」。这个判断只对了一半：
+虚拟化确实在，但它在**滚动时每帧重建 `<tr>`**（`tbody.replaceChildren`）。
+插件原本的打标记方式是「读一次高度 → 写一个 `data-*` 属性」，属性写上去的下一帧就被新节点换掉了，
+等于什么都没做——所以 0.3.0 之后轨迹页的手感反而回到没装插件时。
+
+0.4.0 换成一条**静态 CSS 规则**：规则随样式表一次性生效，浏览器在它自己的样式计算里应用，
+不需要主线程逐行写 DOM，也就不会被重建冲掉。
+
+```css
+[data-trajectory-scroll] tbody tr[data-record-index]:not([data-turn-start]):not([data-terminal-request-boundary]):not([data-request-only]):not([data-collapsed-summary]) > td:last-child {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 30px;
+}
+```
+
+三个约束来自对真实轨迹表的像素级验证：
+
+- **只标内容单元格**（`td:last-child`）。事件列里有绝对定位、故意越界的 `turnRail` 与
+  `requestBoundaryControl`，`content-visibility` 的 paint containment 会把它们裁掉。
+- **排除 `data-turn-start` 行**。这类行用 `td:before` 在自己上边缘画 1px 分隔线，同样会被裁。
+- **排除非标准高度行**（9px 边界行、0px 请求行、24px 折叠摘要行）。它们的占位高度和真实高度
+  不一致，会让滚动条漂移。
+
+实测（2000 行虚拟化轨迹表，每帧重建 46 行，富文本内容）：每帧脚本+布局耗时中位数 **6.3 → 5.0 ms**
+（−21%），p95 **11.6 → 8.3 ms**（−28%）；行高集合与 `scrollHeight` 完全不变；
+同位置截图与未安装插件时 **diff = 0 像素**。
 
 ### 行高必须是真值
 
@@ -63,7 +92,7 @@ DSH 自己的「当前读到第几行」是拿 `getBoundingClientRect()` 做二�
 | --- | --- |
 | `sticky` | 行内有 sticky 子元素（折叠头、代码块横幅）——成为包含块会把 sticky 困住 |
 | `motion` | 行正在折叠 / 展开动画中（`data-chat-motion`）——此时行高在变 |
-| `virtualized` | 位于 DSH 已经虚拟化的表面内（轨迹页） |
+| `virtualized` | 位于 DSH 已经虚拟化的表面内（轨迹页行不逐个打标记，改用静态规则） |
 | `hidden` | 行处于 `hidden` 状态 |
 
 另外 `contenteditable`、`aria-live` 区域、`display: table-*` 的行也一律不标记。
@@ -104,7 +133,7 @@ dsh plugin --profile desktop add ".\dsh-scroll-boost"
 
 ```powershell
 npm pack
-dsh plugin --profile desktop add ".\dsh-scroll-boost-0.3.0.tgz"
+dsh plugin --profile desktop add ".\dsh-scroll-boost-0.4.0.tgz"
 ```
 
 ### 安装后确认
@@ -123,7 +152,7 @@ window.__scrollBoost.report()
 
 ```js
 {
-  version: "0.3.0",
+  version: "0.4.0",
   enabled: true,
   containers: 1,
   hinted: 1,
@@ -183,7 +212,7 @@ DSH 的插件列表从 `locale/<语言>.json` 读取显示文案（`meta.title` 
   0.2.0 的首屏快扫会在视图挂载后的下一帧就标记近端行，实测首次可见行标记从约 200ms 降到约 14ms；
   离屏行仍然由空闲分片慢慢补齐，所以“整页都标记完”仍需要一点时间。
   0.3.0 进一步把变更后的去抖从 300ms 降到 50ms，切到轨迹/会话视图后更快跟上。
-- **依赖 DSH 的内部结构**：0.3.0 认的是 `[data-slot="conversation.chat.flow"]`、
+- **依赖 DSH 的内部结构**：0.4.0 认的是 `[data-slot="conversation.chat.flow"]`、
   `[data-conversation-scroll]`、`[data-trajectory-scroll]` 这些内部属性。DSH 改版后可能失效——
   但插件会保留通用回退路径，且 `report().surfaces` 能直接看出当前认出了什么。
 - **不降低内存和加载时间**：DOM 节点仍在，只是离屏行不参与渲染。
@@ -202,7 +231,7 @@ npm test
 ```
 
 `npm test` 会做语法检查、插件元信息检查（`locale` 字典与 `icon` 约束）、
-0.3.0 回归测试（表面识别、护栏跳过、行高真值复用）和 jsdom 冒烟测试
+回归测试（表面识别、护栏跳过、行高真值复用、轨迹页静态规则）和 jsdom 冒烟测试
 （20 行列表、新增行、disable/enable、cleanup）。
 
 浏览器侧的真实回归（需要本机装有 Edge）：
@@ -214,7 +243,10 @@ npm run test:browser
 - `harness-chat.html`：复刻 DSH 聊天页 DOM（`display: contents` 槽位 + 600 行），
   检查首屏标记时机、粘性横幅行是否被跳过、滚动口是否被提示；
 - `probe-drift.html`：对比标记前后的每行位置与 `scrollHeight`，
-  确认占位高度没有让 DSH 的行定位落到错误的行。
+  确认占位高度没有让 DSH 的行定位落到错误的行；
+- `probe-traj-plugin.html`：复刻 DSH 轨迹表（2000 行、每帧重建 46 行），
+  对比安装前后的每帧耗时、行高与 `scrollHeight`，并核对静态规则是否命中
+  普通行、是否避开 turn-start / 边界行 / 请求行 / 折叠行。
 
 ## 卸载
 

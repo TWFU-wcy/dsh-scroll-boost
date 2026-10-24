@@ -1,15 +1,17 @@
 'use strict'
 /**
- * 0.3.0 regression test: surfaces, guards and height truth.
+ * Regression test: surfaces, guards and height truth.
  *
  * 0.2.x only ever found rows by walking the DOM for a "list that looks
  * scrollable". DSH renders the chat transcript into a slot whose own box is
  * `display: contents`, so that walk never saw the transcript and the chat
- * page stayed unoptimized. 0.3.0 addresses the DSH surfaces directly:
+ * page stayed unoptimized. 0.3.0 started addressing the DSH surfaces directly:
  *
  *   - `chat-flow`   rows   - `[data-slot="conversation.chat.flow"]` children
  *   - `conversation-scroll` hint - the scroll port
- *   - `trajectory`  skip   - DSH virtualizes this surface itself
+ *   - `trajectory`  static - rows are rebuilt every frame, so the surface is
+ *                     covered by a static stylesheet rule instead of an
+ *                     attribute the re-render would wipe
  *
  * The test builds that exact DOM shape and asserts the plugin does the right
  * thing with it, including the cases where it must stay out of the way.
@@ -128,13 +130,31 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   assert.ok(motionRow)
   assert.equal(motionRow.hasAttribute('data-scrollboost-row'), false, 'a collapsing row must be skipped')
 
-  // 5. DSH virtualizes the trajectory surface itself, so the plugin stays out.
+  // 5. The trajectory surface rebuilds its rows every frame, so no row may
+  //    carry an attribute - it would be gone before the frame paints. The
+  //    optimization ships as a static stylesheet rule instead.
   const trajRows = Array.from(document.querySelectorAll('#traj tr'))
   assert.equal(trajRows.length, 2)
   for (const row of trajRows) {
-    assert.equal(row.hasAttribute('data-scrollboost-row'), false, 'virtualized surfaces must not be touched')
+    assert.equal(row.hasAttribute('data-scrollboost-row'), false, 'trajectory rows must not carry an attribute')
   }
   assert.ok(surfaces.has('trajectory'), 'the trajectory surface must be recognized')
+  assert.equal(surfaces.get('trajectory').kind, 'static')
+
+  const style = document.getElementById('dsh-scroll-boost-style')
+  assert.ok(style, 'the plugin must inject its stylesheet')
+  const css = style.textContent
+  assert.ok(
+    css.indexOf('[data-trajectory-scroll] tbody tr[data-record-index]') !== -1,
+    'the static trajectory rule must be shipped'
+  )
+  // The content cell is the only safe target: the event cell paints rails and
+  // a boundary control that overflow their box, and turn-start rows paint a
+  // separator above their own top edge.
+  assert.ok(css.indexOf('> td:last-child') !== -1, 'only the content cell may be skipped')
+  for (const excluded of ['data-turn-start', 'data-terminal-request-boundary', 'data-request-only', 'data-collapsed-summary']) {
+    assert.ok(css.indexOf(':not([' + excluded + '])') !== -1, `${excluded} rows must be excluded`)
+  }
 
   // 6. The height written to --sb-h is the real content box height.
   const first = marked[0]

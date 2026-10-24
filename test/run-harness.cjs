@@ -27,7 +27,10 @@ if (!edge) {
 }
 
 const projectRoot = path.resolve(__dirname, "..");
-const name = process.argv[2] || "harness-chat.html";
+const arg = process.argv[2] || "harness-chat.html";
+const queryAt = arg.indexOf("?");
+const name = queryAt === -1 ? arg : arg.slice(0, queryAt);
+const query = queryAt === -1 ? "" : arg.slice(queryAt);
 const harness = path.resolve(__dirname, name);
 if (!fs.existsSync(harness)) {
 	console.error("harness not found: " + harness);
@@ -92,7 +95,7 @@ server.listen(0, "127.0.0.1", () => {
 			"--disable-extensions",
 			"--window-size=1600,1000",
 			"--user-data-dir=" + profile,
-			"http://127.0.0.1:" + port + "/" + rel
+			"http://127.0.0.1:" + port + "/" + rel + query
 		],
 		{ stdio: "ignore" }
 	);
