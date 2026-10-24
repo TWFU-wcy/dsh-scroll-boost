@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>scroll-boost-harness-chat</title>
+<!--
+  A faithful copy of the DOM shape the DSH chat transcript uses, so the
+  plugin can be verified against the real thing instead of a generic list.
+
+  The three details that matter:
+
+    1. The flow slot itself has `display: contents`, so it has no box of its
+       own. A generic "walk down until you find the row list" search can never
+       see it - this is why the chat transcript stayed unoptimized.
+    2. The rows are direct children of that slot, and each carries a stable
+       `data-chat-flow-key`.
+    3. The scroll port is `[data-conversation-scroll]`, a separate element from
+       the flow slot.
+-->
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  #shell { display: flex; height: 100vh; }
+  #sidebar { width: 260px; flex: none; background: #f3f4f6; overflow-y: auto; }
+  #column { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  [data-conversation-scroll] { flex: 1; min-height: 0; overflow-y: auto; }
+  [data-slot="conversation.chat.flow"] { display: contents; }
+  .turn { padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
+  .turn .body { font: 14px/1.6 system-ui, sans-serif; }
+  .turn.reasoning .body { color: #6b7280; }
+  .banner { position: sticky; top: 0; background: #fef3c7; padding: 6px 16px; }
+</style>
+</head>
+<body>
+<div id="shell">
+  <aside id="sidebar" data-region="sidebar">
+    <div style="height: 900px">sidebar filler</div>
+  </aside>
+  <div id="column" data-conversation-content data-conversation-region="chat">
+    <div data-conversation-scroll id="scroller">
+      <div data-slot="conversation.chat.flow" id="flow"></div>
+    </div>
+  </div>
+</div>
+<script>
+  const flow = document.getElementById("flow");
+  const frag = document.createDocumentFragment();
+  const COUNT = 600;
+  for (let i = 0; i < COUNT; i++) {
+    const turn = document.createElement("div");
+    turn.className = "turn" + (i % 7 === 3 ? " reasoning" : "");
+    turn.setAttribute("data-chat-flow-key", "node-" + i);
+    turn.setAttribute("data-chat-flow-kind", i % 2 === 0 ? "turn-message" : "turn-process");
+    const body = document.createElement("div");
+    body.className = "body";
+    body.textContent = "turn " + i + " — " + "lorem ipsum dolor sit amet ".repeat(i % 4 + 1);
+    turn.appendChild(body);
+    if (i === 5) {
+      // A sticky banner inside a row: the plugin must not skip such a row,
+      // because a containment context would trap the sticky element.
+      const banner = document.createElement("div");
+      banner.className = "banner";
+      banner.setAttribute("data-code-block-banner", "");
+      banner.textContent = "code block banner";
+      turn.appendChild(banner);
+    }
+    frag.appendChild(turn);
+  }
+  flow.appendChild(frag);
+</script>
+<script>
+  window.__ModuleLoader__ = {
+    load({ id, factory }) {
+      window.__plugin = factory(() => { throw new Error("unexpected require"); });
+      window.__pluginId = id;
+    }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  // Hand the result back to the harness runner (the page is served over
+  // HTTP, so the result can be POSTed to the same origin).
+  const publish = (result) => {
+    document.body.setAttribute("data-harness", JSON.stringify(result));
+    if (location.protocol === "http:") {
+      fetch("/__result", { method: "POST", body: JSON.stringify(result) }).catch(() => {});
+    }
+  };
+</script>
+<script>
+  const scroller = document.getElementById("scroller");
+  const flowEl = document.getElementById("flow");
+  const turns = Array.from(flowEl.children);
+  const t0 = performance.now();
+
+  let firstAnyAt = null;
+  let firstVisibleAt = null;
+  const snapshots = [];
+
+  const sample = () => {
+    const at = Math.round(performance.now() - t0);
+    const marked = document.querySelectorAll(".turn[data-scrollboost-row]").length;
+    let visibleMarked = 0;
+    const scrollerRect = scroller.getBoundingClientRect();
+    for (const turn of turns) {
+      if (!turn.hasAttribute("data-scrollboost-row")) continue;
+      const r = turn.getBoundingClientRect();
+      if (r.bottom > scrollerRect.top && r.top < scrollerRect.bottom) visibleMarked++;
+    }
+    if (marked > 0 && firstAnyAt === null) firstAnyAt = at;
+    if (visibleMarked >= 3 && firstVisibleAt === null) firstVisibleAt = at;
+    snapshots.push({ at, marked, visibleMarked });
+  };
+
+  const scrollHeightBefore = scroller.scrollHeight;
+  window.__plugin.apply({ effect() {} });
+  [0, 8, 16, 32, 50, 80, 120, 200, 350, 600, 1000, 1600, 2400].forEach((ms) =>
+    setTimeout(sample, ms)
+  );
+
+  setTimeout(() => {
+    sample();
+    const marked = turns.filter((t) => t.hasAttribute("data-scrollboost-row"));
+    const bannerTurn = document.querySelector('.turn:has(.banner)');
+    const result = {
+      report: window.__scrollBoost.report(),
+      firstAnyAt,
+      firstVisibleAt,
+      snapshots,
+      totalTurns: turns.length,
+      totalMarked: marked.length,
+      scrollHeightBefore,
+      scrollHeightAfter: scroller.scrollHeight,
+      markedHeights: Array.from(new Set(marked.map((t) => t.style.getPropertyValue("--sb-h")))).slice(0, 8),
+      // The sticky-banner row must be left rendered.
+      bannerRowSkipped: bannerTurn ? !bannerTurn.hasAttribute("data-scrollboost-row") : null,
+      // The scroll port must be hinted, the flow slot must not be marked.
+      scrollerHinted: scroller.hasAttribute("data-scrollboost-container"),
+      flowSlotMarked: flowEl.hasAttribute("data-scrollboost-row"),
+      sidebarMarked: document.querySelectorAll("#sidebar[data-scrollboost-row]").length
+    };
+    publish(result);
+  }, 2600);
+</script>
+</body>
+</html>

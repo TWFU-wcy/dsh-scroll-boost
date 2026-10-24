@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>scroll-boost-probe-height</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  [data-conversation-scroll] { height: 900px; overflow-y: auto; }
+  [data-slot="conversation.chat.flow"] { display: contents; }
+  .turn { padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
+  .turn .body { font: 14px/1.6 system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<div data-conversation-scroll id="scroller">
+  <div data-slot="conversation.chat.flow" id="flow"></div>
+</div>
+<script>
+  const flow = document.getElementById("flow");
+  const frag = document.createDocumentFragment();
+  const COUNT = 600;
+  for (let i = 0; i < COUNT; i++) {
+    const turn = document.createElement("div");
+    turn.className = "turn";
+    turn.setAttribute("data-chat-flow-key", "node-" + i);
+    const body = document.createElement("div");
+    body.className = "body";
+    body.textContent = "turn " + i;
+    turn.appendChild(body);
+    frag.appendChild(turn);
+  }
+  flow.appendChild(frag);
+</script>
+<script>
+  window.__ModuleLoader__ = {
+    load({ id, factory }) {
+      window.__plugin = factory(() => { throw new Error("unexpected require"); });
+    }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  const scroller = document.getElementById("scroller");
+  const turns = Array.from(document.getElementById("flow").children);
+
+  const cs = getComputedStyle(turns[0]);
+  const realRects = turns.map((t) => t.getBoundingClientRect().height);
+  const realSum = realRects.reduce((a, b) => a + b, 0);
+  const scrollHeightBefore = scroller.scrollHeight;
+
+  window.__plugin.apply({ effect() {} });
+
+  setTimeout(() => {
+    const marked = turns.filter((t) => t.hasAttribute("data-scrollboost-row"));
+    const stored = marked.map((t) => parseFloat(t.style.getPropertyValue("--sb-h")));
+    const storedSum = stored.reduce((a, b) => a + b, 0);
+    const afterRects = turns.map((t) => t.getBoundingClientRect().height);
+    const afterSum = afterRects.reduce((a, b) => a + b, 0);
+    const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const border = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+    const result = {
+      count: turns.length,
+      marked: marked.length,
+      realFirstRect: realRects[0],
+      afterFirstRect: afterRects[0],
+      realSum,
+      afterSum,
+      storedSum,
+      expectedStoredSum: realSum - (pad + border) * marked.length,
+      pad,
+      border,
+      lineHeight: cs.lineHeight,
+      fontSize: cs.fontSize,
+      scrollHeightBefore,
+      scrollHeightAfter: scroller.scrollHeight,
+      storedSamples: Array.from(new Set(stored.map((v) => Math.round(v * 1000) / 1000))).slice(0, 8)
+    };
+    document.body.setAttribute("data-harness", JSON.stringify(result));
+    fetch("/__result", { method: "POST", body: JSON.stringify(result) }).catch(() => {});
+  }, 2500);
+</script>
+</body>
+</html>

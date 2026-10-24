@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>scroll-boost-probe-drift</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  [data-conversation-scroll] { height: 900px; overflow-y: auto; }
+  [data-slot="conversation.chat.flow"] { display: contents; }
+  .turn { padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
+  .turn .body { font: 14px/1.6 system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<div data-conversation-scroll id="scroller">
+  <div data-slot="conversation.chat.flow" id="flow"></div>
+</div>
+<script>
+  const flow = document.getElementById("flow");
+  const frag = document.createDocumentFragment();
+  const COUNT = 600;
+  for (let i = 0; i < COUNT; i++) {
+    const turn = document.createElement("div");
+    turn.className = "turn";
+    turn.setAttribute("data-chat-flow-key", "node-" + i);
+    const body = document.createElement("div");
+    body.className = "body";
+    body.textContent = "turn " + i + " — " + "lorem ipsum dolor sit amet ".repeat(i % 4 + 1);
+    turn.appendChild(body);
+    frag.appendChild(turn);
+  }
+  flow.appendChild(frag);
+</script>
+<script>
+  window.__ModuleLoader__ = {
+    load({ id, factory }) {
+      window.__plugin = factory(() => { throw new Error("unexpected require"); });
+    }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  const scroller = document.getElementById("scroller");
+  const turns = Array.from(document.getElementById("flow").children);
+
+  // Ground truth: every row's position inside the scroll content.
+  const before = turns.map((t) => t.offsetTop);
+  const beforeH = turns.map((t) => t.offsetHeight);
+
+  window.__plugin.apply({ effect() {} });
+
+  setTimeout(() => {
+    const after = turns.map((t) => t.offsetTop);
+    const afterH = turns.map((t) => t.offsetHeight);
+    let maxTopDrift = 0;
+    let maxHeightDrift = 0;
+    let worstIndex = -1;
+    for (let i = 0; i < turns.length; i++) {
+      const d = Math.abs(after[i] - before[i]);
+      if (d > maxTopDrift) { maxTopDrift = d; worstIndex = i; }
+      const dh = Math.abs(afterH[i] - beforeH[i]);
+      if (dh > maxHeightDrift) maxHeightDrift = dh;
+    }
+    // How far off is DSH's own "which row is at the top" lookup?
+    function readingRow() {
+      const viewportTop = scroller.getBoundingClientRect().top;
+      let lo = 0, hi = turns.length - 1, found = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (turns[mid].getBoundingClientRect().bottom > viewportTop) { found = mid; hi = mid - 1; }
+        else lo = mid + 1;
+      }
+      return found;
+    }
+    const result = {
+      count: turns.length,
+      marked: turns.filter((t) => t.hasAttribute("data-scrollboost-row")).length,
+      maxTopDrift,
+      maxHeightDrift,
+      worstIndex,
+      worstBefore: worstIndex >= 0 ? before[worstIndex] : null,
+      worstAfter: worstIndex >= 0 ? after[worstIndex] : null,
+      scrollHeightBefore: scroller.scrollHeight,
+      scrollHeightAfter: scroller.scrollHeight,
+      readingRowAtTop: readingRow(),
+      report: window.__scrollBoost.report()
+    };
+    document.body.setAttribute("data-harness", JSON.stringify(result));
+    fetch("/__result", { method: "POST", body: JSON.stringify(result) }).catch(() => {});
+  }, 2500);
+</script>
+</body>
+</html>

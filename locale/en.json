@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Scroll Boost",
-    "description": "Keeps the Web GUI scrolling smooth on long conversations: rows outside the viewport stop being rendered, so the first visible frame is already optimized. No visual change, no plugin removed."
+    "description": "Keeps the Web GUI scrolling smooth on long conversations: the plugin recognizes DSH's own surfaces (such as the chat transcript) and stops rows outside the viewport from being rendered, so the first visible frame is already optimized. No visual change, no plugin removed."
   }
 }
