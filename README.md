@@ -20,7 +20,11 @@
 
 ## 运行架构
 
-![dsh-scroll-boost 运行架构](docs/architecture.png)
+![dsh-scroll-boost 0.4.0 运行架构](docs/architecture.png)
+
+图里是 0.4.0 的真实结构：左侧是 DSH 的三个入口（聊天流槽位、轨迹表、会话/摘要滚动口），
+中间是插件自己的表面识别、空闲扫描、行高标记与高度缓存，右侧落到 Chromium 的
+`style → layout → paint`；虚线是 `MutationObserver` 的增量维护与 `will-change` 的合成提示。
 
 点击查看[可交互版本](docs/architecture.html)（可切换主题、搜索节点、查看源码引用）。
 
