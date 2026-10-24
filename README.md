@@ -8,6 +8,7 @@
 > 当前版本：`0.4.0`（识别 DSH 自身的界面结构：聊天流直接接管，轨迹表用静态规则覆盖，行高以真实高度为准）
 
 [![GitHub](https://img.shields.io/badge/GitHub-TWFU--wcy%2Fdsh--scroll--boost-181717?logo=github)](https://github.com/TWFU-wcy/dsh-scroll-boost)
+[![Release](https://img.shields.io/github/v/release/TWFU-wcy/dsh-scroll-boost?label=release)](https://github.com/TWFU-wcy/dsh-scroll-boost/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## 解决什么问题
@@ -135,6 +136,11 @@ dsh plugin --profile desktop add ".\dsh-scroll-boost"
 npm pack
 dsh plugin --profile desktop add ".\dsh-scroll-boost-0.4.0.tgz"
 ```
+
+### 方式四：从 Releases 下载
+
+每个版本在 [Releases](https://github.com/TWFU-wcy/dsh-scroll-boost/releases) 都有更新说明，
+最新版为 [v0.4.0](https://github.com/TWFU-wcy/dsh-scroll-boost/releases/tag/v0.4.0)。
 
 ### 安装后确认
 
