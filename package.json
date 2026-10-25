@@ -54,5 +54,16 @@
         "desktop"
       ]
     }
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TWFU-wcy/dsh-scroll-boost.git"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org"
+  },
+  "bugs": {
+    "url": "https://github.com/TWFU-wcy/dsh-scroll-boost/issues"
+  },
+  "homepage": "https://github.com/TWFU-wcy/dsh-scroll-boost#readme"
 }
