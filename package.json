@@ -1,6 +1,6 @@
 {
   "name": "dsh-scroll-boost",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Client-side scroll performance booster for the DeepSeek Harness web GUI: DSH-aware surface detection, offscreen row skipping with real height truth, compositor hints, idle scanning and incremental maintenance — no visual changes and no plugin removals.",
   "icon": "./icon.svg",
   "type": "module",

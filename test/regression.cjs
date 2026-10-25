@@ -118,12 +118,21 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   assert.equal(scroller.hasAttribute('data-scrollboost-container'), true, 'the scroll port must be hinted')
   assert.equal(document.getElementById('flow').hasAttribute('data-scrollboost-row'), false)
 
-  // 3. The sticky banner row is left rendered: a containment context would
-  //    trap the sticky element.
+  // 3. A row containing a sticky banner is marked like any other: containment
+  //    only applies while the row is skipped, and a skipped row is off screen,
+  //    so the banner is never clipped. (Verified against a real browser: the
+  //    placeholder height is what matters, not the sticky descendant.)
   const bannerRow = document.querySelector('.turn:has(.banner)')
   assert.ok(bannerRow, 'the fixture must contain a sticky banner row')
-  assert.equal(bannerRow.hasAttribute('data-scrollboost-row'), false, 'a row with a sticky descendant must be skipped')
-  assert.ok((report.skipReasons.sticky || 0) >= 1, 'the skip must be reported')
+  assert.equal(bannerRow.hasAttribute('data-scrollboost-row'), true, 'a row with a sticky descendant is marked')
+
+  // 3b. When a marked row changes height (a reasoning block expands), the
+  //     placeholder is refreshed while the row is still on screen.
+  const expandedRow = turns[0]
+  setHeight(expandedRow, 240)
+  expandedRow.querySelector('.body').setAttribute('data-expanded', '')
+  await sleep(80)
+  assert.equal(expandedRow.style.getPropertyValue('--sb-h'), '240px', 'an expanded row must re-measure its height')
 
   // 4. A row that is mid-animation is left alone too.
   const motionRow = turns.find((t) => t.getAttribute('data-chat-motion') === 'collapse')
@@ -157,7 +166,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   // 6. The height written to --sb-h is the real content box height.
-  const first = marked[0]
+  const first = marked.find((row) => row !== expandedRow)
   assert.equal(first.style.getPropertyValue('--sb-h'), '100px')
 
   // 7. Heights survive a restart of the plugin: the second pass reuses the

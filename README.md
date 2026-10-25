@@ -5,7 +5,7 @@
 它不卸载插件、不改 React 组件、不改主题，也不降低画面质量：只在空闲时给「真正可滚动容器里的长列表直接子行」加上
 `content-visibility: auto`，让浏览器跳过屏幕外行的布局与绘制，从而减少滚动时的合成和重排压力。
 
-> 当前版本：`0.4.0`（识别 DSH 自身的界面结构：聊天流直接接管，轨迹表用静态规则覆盖，行高以真实高度为准）
+> 当前版本：`0.4.1`（识别 DSH 自身的界面结构：聊天流直接接管，轨迹表用静态规则覆盖，行高以真实高度为准；展开/折叠后只重测受影响的那一行）
 
 [![GitHub](https://img.shields.io/badge/GitHub-TWFU--wcy%2Fdsh--scroll--boost-181717?logo=github)](https://github.com/TWFU-wcy/dsh-scroll-boost)
 [![Release](https://img.shields.io/github/v/release/TWFU-wcy/dsh-scroll-boost?label=release)](https://github.com/TWFU-wcy/dsh-scroll-boost/releases)
@@ -95,10 +95,15 @@ DSH 自己的「当前读到第几行」是拿 `getBoundingClientRect()` 做二�
 
 | 原因 | 场景 |
 | --- | --- |
-| `sticky` | 行内有 sticky 子元素（折叠头、代码块横幅）——成为包含块会把 sticky 困住 |
 | `motion` | 行正在折叠 / 展开动画中（`data-chat-motion`）——此时行高在变 |
 | `virtualized` | 位于 DSH 已经虚拟化的表面内（轨迹页行不逐个打标记，改用静态规则） |
 | `hidden` | 行处于 `hidden` 状态 |
+
+`content-visibility` 只在行**离屏**时生效；行在视口内时没有任何 containment，所以行内的 sticky
+折叠头、代码块横幅都能正常工作（实测两种模式的截图与几何完全一致）。真正的风险是**占位高度过期**：
+行内容变高（展开思考过程、展开工具输出）后，`--sb-h` 必须跟着更新，否则这行滚出视野再滚回来
+时，滚动条会跳一下。0.4.1 起，带 `data-expanded` / `data-open` / `data-chat-motion` / `hidden`
+的元素发生变化时，只重新测量**它所在的那一行**，而不是扫描整个对话。
 
 另外 `contenteditable`、`aria-live` 区域、`display: table-*` 的行也一律不标记。
 
@@ -138,13 +143,13 @@ dsh plugin --profile desktop add ".\dsh-scroll-boost"
 
 ```powershell
 npm pack
-dsh plugin --profile desktop add ".\dsh-scroll-boost-0.4.0.tgz"
+dsh plugin --profile desktop add ".\dsh-scroll-boost-0.4.1.tgz"
 ```
 
 ### 方式四：从 Releases 下载
 
 每个版本在 [Releases](https://github.com/TWFU-wcy/dsh-scroll-boost/releases) 都有更新说明，
-最新版为 [v0.4.0](https://github.com/TWFU-wcy/dsh-scroll-boost/releases/tag/v0.4.0)。
+最新版为 [v0.4.1](https://github.com/TWFU-wcy/dsh-scroll-boost/releases/tag/v0.4.1)。
 
 ### 安装后确认
 
