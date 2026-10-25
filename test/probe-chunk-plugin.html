@@ -1,0 +1,287 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>probe-chunk-plugin</title>
+<!--
+  Does the chunk layer actually help a long expanded reasoning block?
+
+  The real DSH page renders an expanded "thinking" body as ONE MarkdownText
+  subtree:
+
+    .VJlF5q_root[data-variant=think][data-expanded]
+      > .VJlF5q_thinkBody
+        > ._markdown_1ypvv_5[data-markdown-variant="compact"]
+          > (p | .md-code-block | ul | .md-table-wide) x N
+
+  That subtree is taller than the viewport, so row-level content-visibility can
+  never skip it. This fixture proves, on the real DOM shape:
+
+    1. the chunk rule is in the injected <style>;
+    2. the plugin pins a literal contain-intrinsic-size and tags the block children;
+    3. scrollHeight and every block height are unchanged (zero drift);
+    4. a full layout pass costs less with the chunks in place;
+    5. disable() puts the DOM back exactly as it was.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; }
+  #shell { display: flex; height: 100vh; }
+  #column { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #scroller { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px;
+    container-type: inline-size; }
+  #flow { display: contents; }
+  .turn { min-width: 0; }
+  .VJlF5q_root { display: flex; flex-direction: column; }
+  .VJlF5q_thinkBody { min-width: 0; padding: 4px 0 4px 22px; }
+  ._markdown_1ypvv_5 { min-width: 0; overflow-wrap: anywhere;
+    font: 14px/24px system-ui, sans-serif; color: #222; }
+  ._markdown_1ypvv_5 p { margin: 16px 0; }
+  ._markdown_1ypvv_5 ul { margin: 16px 0; padding-left: 24px; }
+  .md-code-block { position: relative; margin: 16px 0; border-radius: 12px;
+    background: #f6f7f9; border: 1px solid #e3e5e9; overflow: hidden; }
+  .md-code-block pre { margin: 0; padding: 12px 14px; font: 12px/20px ui-monospace, monospace;
+    white-space: pre; overflow: auto; }
+  .md-code-block .code-banner { position: sticky; top: 0; z-index: 6;
+    background: #eef0f3; border-bottom: 1px solid #e3e5e9; padding: 6px 14px;
+    font: 12px/18px system-ui, sans-serif; color: #555; }
+  .md-table-wide { overflow-x: hidden; padding-bottom: 5px; margin-left: -20px;
+    margin-right: -20px; }
+  .md-table-wide table { border-collapse: collapse; width: 100%; }
+  .md-table-wide td, .md-table-wide th { border: 1px solid #e3e5e9; padding: 6px 10px;
+    font: 13px/20px system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<div id="shell">
+  <div id="column" data-conversation-content>
+    <div id="scroller" data-conversation-scroll>
+      <div id="flow" data-slot="conversation.chat.flow"></div>
+    </div>
+  </div>
+</div>
+<script>
+  window.__ModuleLoader__ = {
+    load({ id, factory }) {
+      window.__plugin = factory(() => { throw new Error("unexpected require"); });
+      window.__pluginId = id;
+    }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  const flow = document.getElementById("flow");
+  const scroller = document.getElementById("scroller");
+
+  const PARAS = [
+    "Let me check how the scroll container resolves its sticky header, because that decides whether a placeholder height is safe.",
+    "The table pane uses table-layout: fixed, so column widths never depend on content; only row heights matter here.",
+    "If the intrinsic size of a skipped block is off by even a pixel, the scrollbar thumb drifts while the user drags it.",
+    "So the plan is: measure every block while it is still rendered, write the real height, then let the browser skip it.",
+    "A block that is already off screen still reports its real box as long as content-visibility has not been applied yet.",
+    "Order matters: read all heights first, then write all attributes, otherwise every write invalidates the next read.",
+    "The same trick works for a code block: the sticky banner is positioned inside the block, so it is clipped by the block either way.",
+    "Wide tables bleed out of the markdown column with negative margins; paint containment must not clip that bleed.",
+    "Streaming is the one case where a pinned height goes stale, so the block is left alone until the turn settles.",
+    "Once settled, the whole body is stable, and every block can be skipped independently while the user scrolls.",
+    "That turns one 40,000 pixel layout pass into a few visible blocks, which is the difference between 16ms and 4ms a frame.",
+    "The final check is a screenshot diff at the same scroll offset: the picture must be pixel identical."
+  ];
+  const CODE = [
+    "const state = createState();",
+    "const work = createScanWork();",
+    "while (work.phase !== 'rows') runSlice(work);",
+    "applyBatch(work.rowQueue, work.rowOwner);",
+    "pruneContainers();",
+    "applyHints();",
+    "return report();"
+  ];
+  const ROWS = [
+    ["alpha", "128", "ok"], ["beta", "256", "ok"], ["gamma", "512", "warn"],
+    ["delta", "1024", "ok"], ["epsilon", "2048", "ok"]
+  ];
+
+  function buildThinkingBlocks(count) {
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < count; i++) {
+      const kind = i % 7;
+      if (kind === 3) {
+        const block = document.createElement("div");
+        block.className = "md-code-block";
+        const banner = document.createElement("div");
+        banner.className = "code-banner";
+        banner.textContent = "scan.js";
+        const pre = document.createElement("pre");
+        pre.textContent = CODE.join("\n");
+        block.appendChild(banner);
+        block.appendChild(pre);
+        frag.appendChild(block);
+      } else if (kind === 5) {
+        const ul = document.createElement("ul");
+        for (let j = 0; j < 4; j++) {
+          const li = document.createElement("li");
+          li.textContent = PARAS[(i + j) % PARAS.length].slice(0, 70);
+          ul.appendChild(li);
+        }
+        frag.appendChild(ul);
+      } else if (kind === 6) {
+        const wide = document.createElement("div");
+        wide.className = "md-table-wide";
+        const table = document.createElement("table");
+        const body = document.createElement("tbody");
+        for (const row of ROWS) {
+          const tr = document.createElement("tr");
+          for (const cell of row) {
+            const td = document.createElement("td");
+            td.textContent = cell;
+            tr.appendChild(td);
+          }
+          body.appendChild(tr);
+        }
+        table.appendChild(body);
+        wide.appendChild(table);
+        frag.appendChild(wide);
+      } else {
+        const p = document.createElement("p");
+        p.textContent = PARAS[i % PARAS.length] + " (" + i + ")";
+        frag.appendChild(p);
+      }
+    }
+    return frag;
+  }
+
+  function buildTurn(index, blocks) {
+    const turn = document.createElement("div");
+    turn.className = "turn";
+    turn.setAttribute("data-chat-flow-key", "node-" + index);
+    turn.setAttribute("data-chat-flow-kind", "assistant");
+
+    const root = document.createElement("div");
+    root.className = "VJlF5q_root";
+    root.setAttribute("data-variant", "think");
+    root.setAttribute("data-state", "ok");
+    root.setAttribute("data-expanded", "");
+
+    const body = document.createElement("div");
+    body.className = "VJlF5q_thinkBody";
+
+    const md = document.createElement("div");
+    md.className = "_markdown_1ypvv_5 _compact_1ypvv_331";
+    md.setAttribute("data-markdown-variant", "compact");
+    md.appendChild(buildThinkingBlocks(blocks));
+
+    body.appendChild(md);
+    root.appendChild(body);
+    turn.appendChild(root);
+    return turn;
+  }
+
+  const TOTAL_TURNS = 12;
+  const BLOCKS_PER_TURN = 42;
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < TOTAL_TURNS; i++) frag.appendChild(buildTurn(i, BLOCKS_PER_TURN));
+  flow.appendChild(frag);
+
+  const mdRoot = flow.querySelector('[data-markdown-variant="compact"]');
+
+  function snapHeights() {
+    const out = [];
+    for (const md of flow.querySelectorAll('[data-markdown-variant="compact"]')) {
+      out.push(Math.round(md.getBoundingClientRect().height * 100) / 100);
+    }
+    return out;
+  }
+
+  function forceLayout(i) {
+    // Invalidate style for the whole subtree (custom properties inherit), then
+    // read a box: that is the style-recalc + layout pass a scroll frame pays
+    // when the browser has to re-resolve anything inside the block.
+    document.body.style.setProperty("--probe-tick", String(i));
+    const t0 = performance.now();
+    void scroller.scrollHeight;
+    void scroller.offsetHeight;
+    return performance.now() - t0;
+  }
+
+  function sampleLayout(n) {
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(forceLayout(i));
+    out.sort((a, b) => a - b);
+    const median = out[Math.floor(out.length / 2)];
+    const p95 = out[Math.min(out.length - 1, Math.floor(out.length * 0.95))];
+    return { median: Math.round(median * 100) / 100, p95: Math.round(p95 * 100) / 100, max: Math.round(out[out.length - 1] * 100) / 100 };
+  }
+
+  function bannerCheck() {
+    const block = mdRoot.querySelector(".md-code-block");
+    const banner = block.querySelector(".code-banner");
+    // Park the code block 40px above the scrollport top, then read where the
+    // sticky banner ended up. Before and after must agree.
+    const delta = block.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    scroller.scrollTop += delta - 40;
+    const paneTop = scroller.getBoundingClientRect().top;
+    return Math.round((banner.getBoundingClientRect().top - paneTop) * 100) / 100;
+  }
+
+  const result = { version: null, steps: {} };
+
+  function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  (async () => {
+    await wait(120);
+
+    result.scrollHeightBefore = scroller.scrollHeight;
+    result.heightsBefore = snapHeights();
+    result.bannerBefore = bannerCheck();
+    scroller.scrollTop = 0;
+    await wait(30);
+    result.plain = sampleLayout(40);
+
+    window.__plugin.apply({ effect() {} });
+    await wait(700);
+
+    result.version = (window.__scrollBoost && window.__scrollBoost.report().version) || null;
+    const styleText = (document.getElementById("dsh-scroll-boost-style") || {}).textContent || "";
+    result.styleHasChunkRule = styleText.indexOf("data-scrollboost-chunk") !== -1;
+
+    const report = window.__scrollBoost ? window.__scrollBoost.report() : null;
+    result.report = report ? { chunks: report.chunks, chunkRoots: report.chunkRoots, rows: report.rows, marked: report.marked } : null;
+
+    const chunked = Array.from(flow.querySelectorAll("[data-scrollboost-chunk]"));
+    result.chunkedCount = chunked.length;
+    result.chunkSample = chunked.slice(0, 3).map((el) => el.style.getPropertyValue("contain-intrinsic-size"));
+    result.chunkCv = chunked.length
+      ? getComputedStyle(chunked[0]).contentVisibility
+      : null;
+    result.unchunkedCv = (() => {
+      const all = Array.from(mdRoot.children);
+      const plainChild = all.find((el) => !el.hasAttribute("data-scrollboost-chunk"));
+      return plainChild ? getComputedStyle(plainChild).contentVisibility : null;
+    })();
+
+    result.scrollHeightAfter = scroller.scrollHeight;
+    result.heightsAfter = snapHeights();
+    result.bannerAfter = bannerCheck();
+    scroller.scrollTop = 0;
+    await wait(30);
+    result.chunked = sampleLayout(40);
+
+    // Skip check: a chunk far below the viewport must be reported as skipped.
+    const far = chunked[chunked.length - 1];
+    if (far) {
+      try {
+        result.farChunkVisible = far.checkVisibility({ contentVisibilityAuto: true });
+      } catch (_) { result.farChunkVisible = null; }
+    }
+
+    window.__scrollBoost.disable();
+    await wait(120);
+    result.afterDisableChunks = flow.querySelectorAll("[data-scrollboost-chunk]").length;
+    result.afterDisableScrollHeight = scroller.scrollHeight;
+
+    fetch("/__result", { method: "POST", body: JSON.stringify(result) }).catch(() => {});
+  })();
+</script>
+</body>
+</html>

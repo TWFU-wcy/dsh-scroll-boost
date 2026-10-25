@@ -1,0 +1,339 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>probe-ptc</title>
+<!--
+  PTC mode: the turn's process is one ChatGroupSeat
+
+    div[data-step-process][data-group-expanded-mode]
+      > div[data-step-process-body]            (expanded: max-height none)
+        > div[data-step-process-content][data-chat-flow]
+          > div[data-chat-flow-key]            (one per step)
+            > .VJlF5q_root[data-variant=think][data-expanded]
+              > .VJlF5q_thinkBody
+                > ._markdown_1ypvv_5[data-markdown-variant=compact]
+                  > (p | .md-code-block | ul) x N
+
+  Two questions:
+    A. does the chunk layer reach a reasoning body nested this deep?
+    B. does it hold while the last body is still streaming (prefix frozen,
+       tail appended)?
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; }
+  #scroller { height: 100vh; overflow-y: auto; padding: 16px 24px;
+    box-sizing: border-box; container-type: inline-size; }
+  #flow { display: flex; flex-direction: column; gap: 16px; }
+  .step-process { display: flex; flex-direction: column; }
+  .step-head { position: sticky; top: 0; z-index: 5; background: #fff;
+    padding: 6px 0; border-bottom: 1px solid #e3e5e9; font: 13px system-ui; }
+  .step-body { --dsh-chat-flow-gap: 6px; overscroll-behavior-y: auto;
+    scrollbar-gutter: stable; max-height: min(400px, 50vh); overflow-y: auto; }
+  .step-body.expanded { max-height: none; overflow: visible; }
+  .step-content { display: flex; flex-direction: column; }
+  .step-content > * { flex-shrink: 0; }
+  .step-content > * + * { margin-top: 6px; }
+  .VJlF5q_root { display: flex; flex-direction: column; }
+  .VJlF5q_thinkBody { min-width: 0; padding: 4px 0 4px 22px; }
+  ._markdown_1ypvv_5 { min-width: 0; overflow-wrap: anywhere;
+    font: 13px/20px system-ui, sans-serif; color: #333; }
+  ._markdown_1ypvv_5 p { margin: 4px 0; }
+  ._markdown_1ypvv_5 ul { margin: 4px 0; padding-left: 22px; }
+  .md-code-block { position: relative; margin: 4px 0; border-radius: 10px;
+    background: #f6f7f9; border: 1px solid #e3e5e9; overflow: hidden; }
+  .md-code-block pre { margin: 0; padding: 10px 12px; font: 12px/18px ui-monospace, monospace;
+    white-space: pre; overflow: auto; }
+  .md-code-block .code-banner { position: sticky; top: 0; z-index: 6;
+    background: #eef0f3; border-bottom: 1px solid #e3e5e9; padding: 5px 12px;
+    font: 12px/16px system-ui, sans-serif; color: #555; }
+</style>
+</head>
+<body>
+<div id="scroller" data-conversation-scroll>
+  <div id="flow" data-slot="conversation.chat.flow"></div>
+</div>
+<script>
+  window.__ModuleLoader__ = {
+    load({ id, factory }) {
+      window.__plugin = factory(() => { throw new Error("unexpected require"); });
+      window.__pluginId = id;
+    }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  const scroller = document.getElementById("scroller");
+  const flow = document.getElementById("flow");
+
+  const PARAS = [
+    "Let me re-read the failing assertion: the row index is off by one after the virtual spacer is removed.",
+    "The dispatch table maps a sub-call to its parent; a missing root id means the tree is rebuilt from scratch.",
+    "I will trace the request boundary marker first, then the rail geometry, because both are absolutely positioned.",
+    "The pane keeps table-layout fixed, so the only thing that changes between frames is the row height vector.",
+    "Reading the tool result again: the payload is truncated at 64 KiB, so the tail is missing the closing fence.",
+    "A placeholder that is one pixel short is worse than no placeholder at all; the thumb jumps on every drag.",
+    "The plan is to freeze the finished prefix, pin its measured height, and leave the streaming tail alone.",
+    "If the renderer reuses the same React element keys, the DOM nodes survive and the pinned heights stay valid.",
+    "Checking the sticky header: it is inside the scrollport, so paint containment cannot move it out of view.",
+    "The remaining cost is style recalculation over the frozen prefix, which content-visibility removes per block.",
+    "So the expected win is proportional to the number of off-screen blocks, not to the total node count.",
+    "After the turn settles the tail becomes frozen too, and the whole body can be skipped block by block."
+  ];
+  const CODE = [
+    "const work = createScanWork();",
+    "work.phase = 'chunks';",
+    "while (chunkSlice(work)) await idle();",
+    "flushChunkBatch(work);"
+  ];
+
+  function buildBlocks(count, offset) {
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < count; i++) {
+      const kind = (i + offset) % 6;
+      if (kind === 3) {
+        const block = document.createElement("div");
+        block.className = "md-code-block";
+        const banner = document.createElement("div");
+        banner.className = "code-banner";
+        banner.textContent = "scan.js";
+        const pre = document.createElement("pre");
+        pre.textContent = CODE.join("\n");
+        block.appendChild(banner);
+        block.appendChild(pre);
+        frag.appendChild(block);
+      } else if (kind === 5) {
+        const ul = document.createElement("ul");
+        for (let j = 0; j < 3; j++) {
+          const li = document.createElement("li");
+          li.textContent = PARAS[(i + j) % PARAS.length].slice(0, 64);
+          ul.appendChild(li);
+        }
+        frag.appendChild(ul);
+      } else {
+        const p = document.createElement("p");
+        p.textContent = PARAS[i % PARAS.length] + " (" + i + ")";
+        frag.appendChild(p);
+      }
+    }
+    return frag;
+  }
+
+  function buildStep(index, blocks) {
+    const step = document.createElement("div");
+    step.setAttribute("data-chat-flow-key", "node-" + index);
+    step.setAttribute("data-chat-flow-kind", "assistant");
+
+    const root = document.createElement("div");
+    root.className = "VJlF5q_root";
+    root.setAttribute("data-variant", "think");
+    root.setAttribute("data-state", "ok");
+    root.setAttribute("data-expanded", "");
+
+    const body = document.createElement("div");
+    body.className = "VJlF5q_thinkBody";
+
+    const md = document.createElement("div");
+    md.className = "_markdown_1ypvv_5";
+    md.setAttribute("data-markdown-variant", "compact");
+    md.appendChild(buildBlocks(blocks, index));
+
+    body.appendChild(md);
+    root.appendChild(body);
+    step.appendChild(root);
+    return step;
+  }
+
+  function buildProcess(steps, blocks, expanded) {
+    const wrap = document.createElement("div");
+    wrap.className = "step-process";
+    wrap.setAttribute("data-step-process", "");
+    if (expanded) wrap.setAttribute("data-group-expanded-mode", "");
+
+    const head = document.createElement("div");
+    head.className = "step-head";
+    head.textContent = "Process · " + steps + " steps";
+
+    const body = document.createElement("div");
+    body.className = "step-body" + (expanded ? " expanded" : "");
+    body.setAttribute("data-step-process-body", "");
+
+    const content = document.createElement("div");
+    content.className = "step-content";
+    content.setAttribute("data-step-process-content", "");
+    content.setAttribute("data-chat-flow", "");
+
+    for (let i = 0; i < steps; i++) content.appendChild(buildStep(i, blocks));
+    body.appendChild(content);
+    wrap.appendChild(head);
+    wrap.appendChild(body);
+    return wrap;
+  }
+
+  const params = new URLSearchParams(location.search);
+  const STEPS = Number(params.get("steps")) || 4;
+  const BLOCKS = Number(params.get("blocks")) || 70;
+  const FILLERS = Number(params.get("fillers")) || 6;
+  flow.appendChild(buildProcess(STEPS, BLOCKS, true));
+
+  // Fill the outer scroller so the main scrollbar is real.
+  for (let i = 0; i < FILLERS; i++) {
+    const filler = document.createElement("div");
+    filler.setAttribute("data-chat-flow-key", "filler-" + i);
+    filler.setAttribute("data-chat-flow-kind", "assistant");
+    filler.style.cssText = "height:420px;background:#fafbfc;border:1px solid #eef0f2";
+    flow.appendChild(filler);
+  }
+
+  function snapHeights() {
+    return Array.from(flow.querySelectorAll('[data-markdown-variant="compact"]')).map(
+      (md) => Math.round(md.getBoundingClientRect().height * 100) / 100
+    );
+  }
+
+  function frameCost(n) {
+    return new Promise((resolve) => {
+      const samples = [];
+      let last = performance.now();
+      let i = 0;
+      function tick(now) {
+        samples.push(now - last);
+        last = now;
+        if (++i < n) requestAnimationFrame(tick);
+        else {
+          const sorted = samples.slice().sort((a, b) => a - b);
+          resolve({
+            median: Math.round(sorted[Math.floor(sorted.length / 2)] * 100) / 100,
+            p95: Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] * 100) / 100
+          });
+        }
+      }
+      requestAnimationFrame(tick);
+    });
+  }
+
+  // Scroll the outer conversation and measure how long each scroll handler +
+  // layout round costs while the scrollport is actually moving.
+  function scrollCost(frames) {
+    return new Promise((resolve) => {
+      const samples = [];
+      let i = 0;
+      function step() {
+        const t0 = performance.now();
+        scroller.scrollTop = (i * 37) % Math.max(1, scroller.scrollHeight - scroller.clientHeight);
+        void scroller.scrollHeight;
+        samples.push(performance.now() - t0);
+        if (++i < frames) requestAnimationFrame(step);
+        else {
+          const sorted = samples.slice().sort((a, b) => a - b);
+          resolve({
+            median: Math.round(sorted[Math.floor(sorted.length / 2)] * 100) / 100,
+            p95: Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] * 100) / 100,
+            max: Math.round(sorted[sorted.length - 1] * 100) / 100
+          });
+        }
+      }
+      requestAnimationFrame(step);
+    });
+  }
+
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const result = { steps: {} };
+
+  (async () => {
+    await wait(150);
+    result.scrollHeightBefore = scroller.scrollHeight;
+    result.heightsBefore = snapHeights();
+    result.plainScroll = await scrollCost(40);
+    result.plainFrames = await frameCost(40);
+
+    window.__plugin.apply({ effect() {} });
+    await wait(900);
+
+    const report = window.__scrollBoost ? window.__scrollBoost.report() : null;
+    result.report = report ? {
+      version: report.version,
+      chunks: report.chunks,
+      chunkRoots: report.chunkRoots,
+      rows: report.rows,
+      marked: report.marked,
+      surfaces: report.surfaces
+    } : null;
+
+    const chunked = Array.from(flow.querySelectorAll("[data-scrollboost-chunk]"));
+    result.chunkedCount = chunked.length;
+    // Step level: the units the chunker should pin are the flow items of the
+    // process group, not the Markdown blocks inside them.
+    const content = flow.querySelector("[data-step-process-content]");
+    const stepEls = content ? Array.from(content.children) : [];
+    result.stepCount = stepEls.length;
+    result.chunkedSteps = stepEls.filter((el) => el.hasAttribute("data-scrollboost-chunk")).length;
+    result.chunkedInnerBlocks = flow.querySelectorAll(
+      '[data-markdown-variant="compact"] > [data-scrollboost-chunk]'
+    ).length;
+    result.chunkPerStep = stepEls.map((el) => (el.hasAttribute("data-scrollboost-chunk") ? 1 : 0));
+    result.chunkSample = chunked.slice(0, 3).map((el) =>
+      el.style.getPropertyValue("contain-intrinsic-size")
+    );
+    result.chunkCv = chunked.length ? getComputedStyle(chunked[0]).contentVisibility : null;
+    result.scrollHeightAfter = scroller.scrollHeight;
+    result.heightsAfter = snapHeights();
+    result.chunkedScroll = await scrollCost(40);
+    result.chunkedFrames = await frameCost(40);
+
+    // Streaming simulation: append blocks to the last body while scrolling.
+    const lastMd = Array.from(flow.querySelectorAll('[data-markdown-variant="compact"]')).pop();
+    const lastRoot = lastMd.closest(".VJlF5q_root");
+    lastRoot.setAttribute("data-state", "running");
+    let appended = 0;
+    const timer = setInterval(() => {
+      const p = document.createElement("p");
+      p.textContent = "streamed token block " + (appended++) + " " + PARAS[appended % PARAS.length];
+      lastMd.appendChild(p);
+      void scroller.scrollHeight;
+    }, 60);
+    await wait(120);
+    result.streamScroll = await scrollCost(40);
+    clearInterval(timer);
+    result.streamAppended = appended;
+
+    // Top-up: a step that was still streaming during the scan becomes
+    // chunkable the moment it settles. Without a top-up the group would keep
+    // that one step unpinned for the rest of the session.
+    const lateStep = buildStep(999, BLOCKS);
+    const lateRoot = lateStep.querySelector(".VJlF5q_root");
+    lateRoot.setAttribute("data-state", "running");
+    content.appendChild(lateStep);
+    void scroller.scrollHeight;
+    await wait(150);
+    result.lateBeforeSettle = lateStep.hasAttribute("data-scrollboost-chunk");
+    lateRoot.setAttribute("data-state", "ok");
+    const heightBeforeLate = scroller.scrollHeight;
+    await wait(1200);
+    result.lateAfterSettle = lateStep.hasAttribute("data-scrollboost-chunk");
+    result.latePinned = lateStep.style.getPropertyValue("contain-intrinsic-size");
+    result.lateScrollHeightDelta = scroller.scrollHeight - heightBeforeLate;
+
+    // A step appended later (a fresh flow item) must be picked up too.
+    const extraStep = buildStep(1000, BLOCKS);
+    content.appendChild(extraStep);
+    const heightBeforeExtra = scroller.scrollHeight;
+    await wait(1200);
+    result.extraChunked = extraStep.hasAttribute("data-scrollboost-chunk");
+    result.extraPinned = extraStep.style.getPropertyValue("contain-intrinsic-size");
+    result.extraScrollHeightDelta = scroller.scrollHeight - heightBeforeExtra;
+    result.stepsAfterTopUp = content.children.length;
+    result.chunkedStepsAfterTopUp = Array.from(content.children)
+      .filter((el) => el.hasAttribute("data-scrollboost-chunk")).length;
+    result.reportAfterTopUp = window.__scrollBoost ? window.__scrollBoost.report().chunks : null;
+
+    window.__scrollBoost.disable();
+    await wait(150);
+    result.afterDisableChunks = flow.querySelectorAll("[data-scrollboost-chunk]").length;
+    result.afterDisableScrollHeight = scroller.scrollHeight;
+
+    fetch("/__result", { method: "POST", body: JSON.stringify(result) }).catch(() => {});
+  })();
+</script>
+</body>
+</html>

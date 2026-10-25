@@ -37,6 +37,21 @@ const chatRows = Array.from({ length: 12 }, (_, i) => {
   </div>`
 }).join('')
 
+// A long expanded reasoning body: one Markdown subtree whose direct block
+// children are the chunkable units. `data-markdown-variant="compact"` is the
+// hook DSH itself emits for reasoning content only.
+const chunkChildren = Array.from({ length: 8 }, (_, i) => `<p>paragraph ${i}</p>`).join('')
+
+// An expanded process group: each step is one flow item, and the step boxes are
+// the coarse units the chunker should pin (not the Markdown blocks inside them).
+const ptcSteps = Array.from({ length: 6 }, (_, i) => `<div class="step" data-chat-flow-key="step-${i}">
+      <div class="VJlF5q_root" data-state="ok" data-expanded>
+        <div class="VJlF5q_thinkBody"><div data-markdown-variant="compact">
+          <p>step ${i} paragraph 0</p><p>step ${i} paragraph 1</p>
+        </div></div>
+      </div>
+    </div>`).join('')
+
 const dom = new JSDOM(
   `<!doctype html><html><head></head><body>
     <div id="column" data-conversation-content data-conversation-region="chat">
@@ -49,6 +64,17 @@ const dom = new JSDOM(
         <tr data-trajectory-row-key="r0"><td>trajectory row 0</td></tr>
         <tr data-trajectory-row-key="r1"><td>trajectory row 1</td></tr>
       </tbody></table>
+    </div>
+    <div id="think" data-state="ok" data-expanded>
+      <div data-markdown-variant="compact" id="thinkBody">${chunkChildren}</div>
+    </div>
+    <div id="streaming" data-state="running">
+      <div data-markdown-variant="compact" id="streamBody">${chunkChildren}</div>
+    </div>
+    <div id="ptc" data-step-process data-group-expanded-mode>
+      <div data-step-process-body>
+        <div data-step-process-content data-chat-flow id="ptcContent">${ptcSteps}</div>
+      </div>
     </div>
   </body></html>`,
   { runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://localhost/' }
@@ -67,6 +93,22 @@ setHeight(document.getElementById('scroller'), 600)
 setHeight(document.getElementById('flow'), 1400)
 setHeight(document.getElementById('traj'), 600)
 for (const row of document.querySelectorAll('.turn')) setHeight(row, 100)
+
+// The reasoning bodies are taller than the viewport, which is what makes them
+// worth chunking; each block child is a real box.
+const thinkBody = document.getElementById('thinkBody')
+const streamBody = document.getElementById('streamBody')
+setHeight(thinkBody, 4000)
+setHeight(streamBody, 4000)
+for (const body of [thinkBody, streamBody]) {
+  for (const child of body.children) setHeight(child, 500)
+}
+
+// The process group is much taller than the viewport; each step is 900px.
+const ptcContent = document.getElementById('ptcContent')
+setHeight(document.getElementById('ptc'), 5400)
+setHeight(ptcContent, 5400)
+for (const step of ptcContent.children) setHeight(step, 900)
 
 window.Element.prototype.getBoundingClientRect = function getBoundingClientRect() {
   const height = heights.get(this) || 0
@@ -168,6 +210,115 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   // 6. The height written to --sb-h is the real content box height.
   const first = marked.find((row) => row !== expandedRow)
   assert.equal(first.style.getPropertyValue('--sb-h'), '100px')
+
+  // 6b. A long expanded process group is chunked step by step: every step gets
+  //     the skipping attribute and a literal pinned height. Pinning per step is
+  //     far cheaper than per Markdown block, and the placeholder must carry the
+  //     measured height or the scrollbar drifts as the user scrolls.
+  const ptcStepsEls = Array.from(document.getElementById('ptcContent').children)
+  assert.equal(ptcStepsEls.length, 6)
+  for (const step of ptcStepsEls) {
+    assert.equal(step.hasAttribute('data-scrollboost-chunk'), true, 'every step of the group is chunked')
+    assert.equal(
+      step.style.getPropertyValue('contain-intrinsic-size'),
+      'auto 900px',
+      'the pinned height is the measured one, as a literal'
+    )
+  }
+  // The Markdown blocks inside the group must stay untouched: the outer step
+  // box already covers them.
+  for (const md of document.querySelectorAll('#ptcContent [data-markdown-variant="compact"] > *')) {
+    assert.equal(md.hasAttribute('data-scrollboost-chunk'), false, 'inner blocks are covered by the step box')
+  }
+  assert.ok(report.chunks >= 6, `report must count the chunks (got ${report.chunks})`)
+  assert.ok(report.chunkRoots >= 1, 'report must count the chunk roots')
+
+  // 6b2. A long reasoning body outside a process group is still chunked, block
+  //      by block - that is the only coarse box available there.
+  const chunks = Array.from(thinkBody.children)
+  assert.equal(chunks.length, 8)
+  for (const chunk of chunks) {
+    assert.equal(chunk.hasAttribute('data-scrollboost-chunk'), true, 'every block child is chunked')
+    assert.equal(
+      chunk.style.getPropertyValue('contain-intrinsic-size'),
+      'auto 500px',
+      'the pinned height is the measured one, as a literal'
+    )
+  }
+
+  // 6b3. A process group keeps growing while the turn runs: each step settles
+  //      one at a time. A settled step appended later must be pinned too, or
+  //      the group would keep one unpinned step for the rest of the session.
+  const lateStep = document.createElement('div')
+  lateStep.className = 'step'
+  lateStep.setAttribute('data-chat-flow-key', 'step-late')
+  const lateRoot = document.createElement('div')
+  lateRoot.className = 'VJlF5q_root'
+  lateRoot.setAttribute('data-state', 'running')
+  lateRoot.setAttribute('data-expanded', '')
+  const lateBody = document.createElement('div')
+  lateBody.className = 'VJlF5q_thinkBody'
+  const lateMd = document.createElement('div')
+  lateMd.setAttribute('data-markdown-variant', 'compact')
+  lateMd.innerHTML = chunkChildren
+  lateBody.appendChild(lateMd)
+  lateRoot.appendChild(lateBody)
+  lateStep.appendChild(lateRoot)
+  document.getElementById('ptcContent').appendChild(lateStep)
+  setHeight(lateStep, 700)
+  await sleep(300)
+  assert.equal(
+    lateStep.hasAttribute('data-scrollboost-chunk'),
+    false,
+    'a step that is still streaming must not be pinned'
+  )
+  lateRoot.setAttribute('data-state', 'ok')
+  await sleep(600)
+  assert.equal(
+    lateStep.hasAttribute('data-scrollboost-chunk'),
+    true,
+    'a step that settles later must be pinned without a full re-scan'
+  )
+  assert.equal(
+    lateStep.style.getPropertyValue('contain-intrinsic-size'),
+    'auto 700px',
+    'the late step is pinned to its own measured height'
+  )
+
+  // 6c. A body that is still streaming must not be pinned at all. Pinning
+  //     every settled block above the live one looks tempting, but each new
+  //     token then tears down and rebuilds the containment of every skipped
+  //     box: measured 2.4x slower than leaving the body alone. The protection
+  //     while a body streams is `contain: layout` from the stylesheet, which
+  //     costs nothing per token.
+  const streamKids = Array.from(streamBody.children)
+  for (const kid of streamKids) {
+    assert.equal(
+      kid.hasAttribute('data-scrollboost-chunk'),
+      false,
+      'a body that is still streaming must not be pinned'
+    )
+  }
+  const styleText = document.getElementById('dsh-scroll-boost-style').textContent
+  assert.ok(
+    styleText.indexOf('[data-markdown-variant="compact"]') >= 0,
+    'the streaming body must be covered by a static contain rule'
+  )
+  assert.ok(
+    /\[data-markdown-variant="compact"\]\s*\{\s*contain:\s*layout;/.test(styleText),
+    'the static rule must use contain: layout'
+  )
+
+  // 6d. When the stream finishes, data-state flips to "ok" without any node
+  //     being added. That transition has to schedule a pass on its own, and
+  //     the previously live block must then be pinned too.
+  document.getElementById('streaming').setAttribute('data-state', 'ok')
+  await sleep(600)
+  const streamChunks = Array.from(streamBody.children)
+  assert.ok(
+    streamChunks.every((chunk) => chunk.hasAttribute('data-scrollboost-chunk')),
+    'a settled body must be chunked after the stream ends'
+  )
 
   // 7. Heights survive a restart of the plugin: the second pass reuses the
   //    remembered height instead of measuring again.

@@ -1,0 +1,203 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>probe-stream-plugin</title>
+<!--
+  End-to-end check of the streaming policy: load the real plugin, stream a
+  long reasoning body into the page the way DSH does (one block per token,
+  data-state="running" on the reasoning row), and compare the cost of a token
+  with the plugin enabled and disabled.
+
+  Also verifies what the user actually feels: scroll a long body while it
+  streams, with and without the plugin.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; }
+  #shell { display: flex; height: 100vh; }
+  #column { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #scroller { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px; }
+  #flow { display: contents; }
+  .VJlF5q_root { display: flex; flex-direction: column; }
+  .VJlF5q_thinkBody { min-width: 0; padding: 4px 0 4px 22px; }
+  ._markdown_1ypvv_5 { min-width: 0; overflow-wrap: anywhere;
+    font: 14px/24px system-ui, sans-serif; color: #222; }
+  ._markdown_1ypvv_5 p { margin: 16px 0; }
+  ._markdown_1ypvv_5 ul { margin: 16px 0; padding-left: 24px; }
+  .md-code-block { position: relative; margin: 16px 0; border-radius: 12px;
+    background: #f6f7f9; border: 1px solid #e3e5e9; overflow: hidden; }
+  .md-code-block pre { margin: 0; padding: 12px 14px; font: 12px/20px ui-monospace, monospace;
+    white-space: pre; overflow: auto; }
+</style>
+</head>
+<body>
+<div id="shell">
+  <div id="column" data-conversation-content>
+    <div id="scroller" data-conversation-scroll>
+      <div id="flow" data-slot="conversation.chat.flow"></div>
+    </div>
+  </div>
+</div>
+<script>
+  window.__ModuleLoader__ = {
+    load({ id, factory }) {
+      window.__plugin = factory(() => { throw new Error("unexpected require"); });
+      window.__pluginId = id;
+    }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  const PARAS = [
+    "Let me look at how the request is routed before touching the cache.",
+    "The important detail is the ordering: the write happens before the flush.",
+    "I should check whether the retry loop can spin without a backoff.",
+    "There is a subtle interaction between the timeout and the abort signal.",
+    "The token budget is recomputed on every turn, which looks expensive."
+  ];
+  const flow = document.getElementById("flow");
+  const scroller = document.getElementById("scroller");
+  const BLOCKS = 3000;
+  const TOKENS = 40;
+  const ROUNDS = 3;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  let seq = 0;
+  function buildBlock() {
+    const i = seq++;
+    if (i % 17 === 0) {
+      const box = document.createElement("div");
+      box.className = "md-code-block";
+      const pre = document.createElement("pre");
+      pre.textContent = "const a" + i + " = await read(" + i + ");\nreturn a" + i + ".value;";
+      box.appendChild(pre);
+      return box;
+    }
+    if (i % 11 === 0) {
+      const ul = document.createElement("ul");
+      for (let k = 0; k < 3; k++) {
+        const li = document.createElement("li");
+        li.textContent = PARAS[(i + k) % PARAS.length];
+        ul.appendChild(li);
+      }
+      return ul;
+    }
+    const p = document.createElement("p");
+    p.textContent = PARAS[i % PARAS.length] + " (" + i + ")";
+    return p;
+  }
+
+  const turn = document.createElement("div");
+  turn.className = "turn";
+  const root = document.createElement("div");
+  root.className = "VJlF5q_root";
+  root.setAttribute("data-variant", "think");
+  root.setAttribute("data-state", "running");
+  root.setAttribute("data-expanded", "");
+  const body = document.createElement("div");
+  body.className = "VJlF5q_thinkBody";
+  const md = document.createElement("div");
+  md.className = "_markdown_1ypvv_5";
+  md.setAttribute("data-markdown-variant", "compact");
+  body.appendChild(md);
+  root.appendChild(body);
+  turn.appendChild(root);
+  flow.appendChild(turn);
+
+  const stat = (arr) => {
+    if (!arr.length) return { median: 0, p95: 0, max: 0 };
+    const sorted = arr.slice().sort((a, b) => a - b);
+    const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+    return { median: +at(0.5).toFixed(2), p95: +at(0.95).toFixed(2), max: +at(1).toFixed(2) };
+  };
+
+  function buildBase() {
+    md.replaceChildren();
+    for (let i = 0; i < BLOCKS; i++) md.appendChild(buildBlock());
+    void scroller.scrollHeight;
+  }
+
+  // One token per frame, with the layout forced the way the browser would.
+  function runTokens() {
+    const out = [];
+    for (let i = 0; i < TOKENS; i++) {
+      md.appendChild(buildBlock());
+      const t0 = performance.now();
+      void scroller.scrollHeight;
+      out.push(performance.now() - t0);
+    }
+    return out;
+  }
+
+  // Scroll the body while it is still growing: the case the user reported.
+  function runScroll() {
+    const out = [];
+    const span = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
+    for (let i = 0; i < TOKENS; i++) {
+      md.appendChild(buildBlock());
+      scroller.scrollTop = (i * 211) % span;
+      const t0 = performance.now();
+      void scroller.scrollHeight;
+      out.push(performance.now() - t0);
+    }
+    return out;
+  }
+
+  (async function () {
+    window.__plugin.apply({ effect() {} });
+    await wait(200);
+    const result = { blocks: BLOCKS, tokens: TOKENS, rounds: ROUNDS };
+    const modes = ["off", "on", "off-again"];
+    const tokenSamples = { off: [], on: [], "off-again": [] };
+    const scrollSamples = { off: [], on: [], "off-again": [] };
+    for (let round = 0; round < ROUNDS; round++) {
+      for (const mode of modes) {
+        buildBase();
+        root.setAttribute("data-state", "running");
+        if (mode === "on") window.__scrollBoost.enable();
+        else window.__scrollBoost.disable();
+        await wait(200);
+        for (const v of runTokens()) tokenSamples[mode].push(v);
+        // Reset and scroll while streaming.
+        buildBase();
+        root.setAttribute("data-state", "running");
+        await wait(120);
+        for (const v of runScroll()) scrollSamples[mode].push(v);
+        await wait(60);
+      }
+    }
+    for (const mode of modes) {
+      result["token-" + mode] = stat(tokenSamples[mode]);
+      result["scroll-" + mode] = stat(scrollSamples[mode]);
+    }
+    // Settle the body and confirm the pins land.
+    root.setAttribute("data-state", "ok");
+    window.__scrollBoost.enable();
+    await wait(900);
+    const rep = window.__scrollBoost.report();
+    result.report = {
+      version: rep.version,
+      chunks: rep.chunks,
+      chunkRoots: rep.chunkRoots,
+      scans: rep.scans,
+      pending: rep.pending
+    };
+    result.scrollHeightAfterSettle = scroller.scrollHeight;
+    window.__scrollBoost.disable();
+    result.afterDisableChunks = document.querySelectorAll("[data-scrollboost-chunk]").length;
+    result.afterDisableHeight = scroller.scrollHeight;
+    await fetch("/__result", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(result)
+    });
+  })().catch(async (error) => {
+    await fetch("/__result", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ error: String((error && error.stack) || error) })
+    });
+  });
+</script>
+</body>
+</html>
