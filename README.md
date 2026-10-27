@@ -345,8 +345,9 @@ window.__scrollBoost.destroy();  // 彻底卸载当前实例
 DSH 的插件列表从 `locale/<语言>.json` 读取显示文案（`meta.title` / `meta.description`），
 缺失时回退到 `package.json` 的 `name` / `description`；图标取自 `package.json` 的 `icon` 字段。
 
-本插件提供 `locale/en.json` 与 `locale/zh.json`，中文界面下显示为「滚动加速」及对应说明；
-`icon.svg` 为 873 B 的矢量图标，位于包内。修改文案后需要**完全重启 DSH** 才会重新读取。
+本插件提供 `locale/en.json` 与 `locale/zh.json`，中文界面下显示为「滚动加速」及对应说明。
+图标取自 `assets/avatar-180.jpg`（作者头像，180×180，8 KB）；`icon.svg` 仍随包发布，供需要矢量图的场合使用。
+修改文案后需要**完全重启 DSH** 才会重新读取。
 
 ## 验收建议
 
