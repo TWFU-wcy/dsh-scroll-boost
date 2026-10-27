@@ -1,8 +1,8 @@
 {
   "name": "dsh-scroll-boost",
-  "version": "0.6.1",
+  "version": "0.6.0",
   "description": "Client-side scroll performance booster for the DeepSeek Harness web GUI: DSH-aware surface detection, offscreen row skipping with real height truth, step-level chunking for long PTC reasoning groups and block-level chunking elsewhere, compositor hints, idle scanning and incremental maintenance — no visual changes and no plugin removals.",
-  "icon": "./assets/avatar-180.jpg",
+  "icon": "./icon.svg",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -17,7 +17,6 @@
     "cordis.patch.yml",
     "locale",
     "icon.svg",
-    "assets/avatar-180.jpg",
     "README.md",
     "LICENSE"
   ],
