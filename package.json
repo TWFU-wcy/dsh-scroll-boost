@@ -1,6 +1,6 @@
 {
   "name": "dsh-scroll-boost",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Client-side scroll performance booster for the DeepSeek Harness web GUI: DSH-aware surface detection, offscreen row skipping with real height truth, step-level chunking for long PTC reasoning groups and block-level chunking elsewhere, compositor hints, idle scanning and incremental maintenance — no visual changes and no plugin removals.",
   "icon": "./icon.svg",
   "type": "module",
@@ -68,5 +68,5 @@
     "url": "https://github.com/TWFU-wcy/dsh-scroll-boost/issues"
   },
   "homepage": "https://github.com/TWFU-wcy/dsh-scroll-boost#readme",
-  "gitHead": "3dcddd60b1d51985130f099b083a59e1c867b811"
+  "gitHead": "d7483cdcb92e4e6e26503b45c28880b4ebd13009"
 }
