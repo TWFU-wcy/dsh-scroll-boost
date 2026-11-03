@@ -5,9 +5,10 @@
 它不卸载插件、不改 React 组件、不改主题，也不降低画面质量：只在空闲时给「真正可滚动容器里的长列表直接子行」加上
 `content-visibility: auto`，让浏览器跳过屏幕外行的布局与绘制，从而减少滚动时的合成和重排压力。
 
-> 当前版本：`0.6.0`（识别 DSH 自身的界面结构：聊天流直接接管，轨迹表用静态规则覆盖，
+> 当前版本：`0.7.1`（识别 DSH 自身的界面结构：聊天流直接接管，轨迹表用静态规则覆盖，
 > PTC 过程按「步」跳过、普通长思考正文按块跳过；**正在流式增长的正文改成只加 `contain: layout`**，
-> 不再逐块打跳过标记；行高以真实高度为准；展开/折叠后只重测受影响的那一行）
+> 不再逐块打跳过标记；行高以真实高度为准并改成字面量钉高；展开/折叠后只重测受影响的那一行；
+> 失联表面自动剪枝、拖拽宽度不再触发强制布局、`will-change` 可一键关掉换取逐像素一致）
 
 [![GitHub](https://img.shields.io/badge/GitHub-TWFU--wcy%2Fdsh--scroll--boost-181717?logo=github)](https://github.com/TWFU-wcy/dsh-scroll-boost)
 [![Release](https://img.shields.io/github/v/release/TWFU-wcy/dsh-scroll-boost?label=release)](https://github.com/TWFU-wcy/dsh-scroll-boost/releases)
@@ -162,6 +163,81 @@ p95 **14.6 → 0.5 ms**；`scrollHeight` 前后一致（134759），40 个 step 
 增量补齐也单独验过：往已钉好的组里再追加一个刚结束流式的 step，它会在一秒内被钉上，
 `scrollHeight` 变化 **0px**。
 
+### 0.7.x：五处修正（都不改画面）
+
+这一版没有新算法，只是把 0.6.0 里几处「看着能用、实际在漏」的地方补上。
+
+**行高改用字面量。** 0.6.0 已经在块级验过：`contain-intrinsic-size: auto var(--sb-chunk-h)` 比
+`auto <N>px` 慢约 6 倍（18.1 ms vs 2.8 ms），因为每个被跳过的盒子在每次样式重算时都要解析一次
+自定义属性。行级当时没跟上，仍是 `var(--sb-h)`。现在的行数比块数还多一个量级，`applyRowHeight()`
+直接写 `contain-intrinsic-size: auto <N>px`；`--sb-h` 保留，只作为 `report()` 和人工排查的读数。
+
+**表面表会自己收敛。** `discoverSurfaces()` 原来只往里加。切会话、开关轨迹面板之后，旧元素
+永远留在 `state.surfaces` 里，连同它的 `rows` 集合一起钉住一棵已经脱离文档的子树。现在每次发现
+都跑一次 `pruneSurfaces()`：元素断链就整条删掉，行断链就单独剔掉。
+
+**宽度变化由 `ResizeObserver` 自己回答。** 0.7.0 一开始写成了监听 `window.resize`、清空全部
+高度缓存再重扫整页——那是错的，并且正是它让拖拽明显变卡（0.7.0 因此被撤回）。正确做法是把
+`ResizeObserver` 的回调改成只读 `entry.contentRect`、不调 `getBoundingClientRect()`：宽度变化的行
+本来就会各自报一次，逐行校正，不需要窗口级监听，也不需要全量重测。见下一节。
+
+**bfcache 回退不再永久失效。** 原来 `pagehide` 注册的是 `destroy` 加 `{ once: true }`：从浏览历史
+后退回来时插件已经被拆干净，`window.__scrollBoost` 也没了。现在 `pagehide` 只在 `persisted` 时
+走 `pause()`（保留标记与缓存，只停调度），`pageshow` 再 `resume()`。
+
+**`will-change` 可以关。** 它把滚动口提成独立合成层，文字从 LCD 子像素抗锯齿变成灰度——几何和
+`scrollHeight` 都不变，但同位置截图会差几万个像素（见「代价」一节）。这层收益真实存在，但不是人人
+都想要，所以做成运行时开关：`window.__scrollBoost.setPixelSafe(true)`。
+
+顺手清掉的：`markRow()`（`applyBatch()` 之后没有任何调用方）、`rowsThisSlice` 累加器、
+永不触发的 `measure: false` 分支、`data-scrollboost-scrolling` 属性及其每容器的清理定时器、
+四个只写不读的 state 字段，以及两处不一致的滚动阈值（溢出扫描曾用 `+80`，其余用 `+4`，
+差 5–80px 的容器会被一条路径收下、被另一条漏掉）。
+
+`report().marked` 也改成了与 `rows` 同口径的实时计数：它原来是跨扫描累加，多扫几轮就会大于
+`rows`，看起来像有 bug。
+
+另加三个 `hint` 表面：`[data-input-scroll]`、`[data-approval-scroll]`、`[data-question-scroll]`。
+它们都是面板内部有 `max-height` 的滚动口，没有行可跳，加进来是为了让空闲扫描在用户滚动它们时
+暂停。文档缩放视口 `[data-document-zoom-scrollport]` 有意不加：它是缩放变换的目标，给它加合成
+提示会改变文档的栅格化方式。
+
+块高也进了 localStorage：键是「最近的稳定祖先 key + 子节点索引路径」，没有稳定 key 的正文不缓存。
+这样长会话重开后，展开过的思考正文不必重新测量每个块。
+
+### 0.7.1：拖拽宽度不再卡顿
+
+0.7.0 为了「宽度变了行高就错了」这件事，监听了 `window.resize`：防抖 200 ms，清空全部行高与块高
+缓存，摘掉所有标记，再重扫整页。思路对，做法错——它把一个本来只影响少数行的变化，变成了全量重建，
+而且正好发生在用户拖拽的过程中。0.7.0 因此被撤回，没有发布到 npm。
+
+真正的问题在更早的地方，0.6.0 就有。拖动会话宽度手柄时，被 `ResizeObserver` 观察的行（最多 200 行）
+在同一帧全部改变宽度，回调随即收到 200 个条目。原来的回调对每个条目都做：
+
+```js
+const rect = target.getBoundingClientRect();   // 读几何
+const cs = getRowStyle(target);                // getComputedStyle，也是一次读
+applyRowHeight(target, inner);                 // 写样式
+```
+
+读-写-读-写交替，每一次读都会把上一次写造成的脏样式重新布局一遍。这就是强制同步布局。
+
+修法是回调里什么也不测：`ResizeObserverEntry.contentRect` 本身就是内容盒，正好是
+`contain-intrinsic-size` 描述的那个盒子。再加一条「与当前值相差不到 0.5px 就不写」，
+纯宽度变化就不必把每行样式都标脏一次。**窗口级 `resize` 监听整个不需要**：宽度变了的行本来就会
+各自报一次，逐行校正比全量重测准确得多，也便宜得多。
+
+| 600 行 / 观察 200 行 / 拖拽 120 帧 | 0.6.0 与 0.7.0 | 0.7.1 |
+| --- | --- | --- |
+| 每帧 `getBoundingClientRect` 次数 | **390** | **0** |
+| 拖拽期间总 rect 读 | **46800** | **0** |
+| 长帧（>25ms） | 0 | 0 |
+
+长帧数看不出差别——帧间隔被 vsync 钉在 16.7ms，工作量再大，只要还在预算内就只是「刚好赶上」。
+所以判据是 rect 读次数，不是帧时间。探针在 `test/probe-resize-plugin.html`，已接进
+`npm run test:browser`；`test/regression.cjs` 里也有一条断言：jsdom 没有 `ResizeObserver`，
+测试自带可控替身，投递条目时若发生任何 rect 读即失败（对旧实现运行会得到 `actual: 2, expected: 0`）。
+
 ### 正在流式增长的正文：只加 `contain: layout`
 
 这是**最新的一次改动，也是收益最大的一次**：用户反馈「所有很长的思考过程滚动都卡，
@@ -214,8 +290,9 @@ DSH 自己的「当前读到第几行」是拿 `getBoundingClientRect()` 做二�
 
 - 离屏行不读布局，直接用**按 `data-chat-flow-key` 记住的历史高度**（WeakMap + localStorage）；
 - 可见带才实测一次，且减去 padding / border（`contain-intrinsic-size` 描述的是内容盒）；
-- 高度以 0.01px 精度写入 `--sb-h`，避免上千行累积出可见的滚动条漂移；
-- `ResizeObserver` 盯着近端行，行高变化时立即纠正。
+- 高度以 0.01px 精度直接写成 `contain-intrinsic-size: auto <N>px` 字面量（不是 `var()`——每个被跳过的盒子每次样式重算都要解析一次自定义属性，实测慢约 6 倍；`--sb-h` 仍然写，供 `report()` 和人工排查读取）；
+- `ResizeObserver` 盯着近端行，行高变化时立即纠正；
+- 校正时**只读观察回调自带的 `contentRect`**，绝不在回调里调 `getBoundingClientRect()`（0.7.1 修）。
 
 实测（600 行聊天记录，headless Edge）：标记后 `scrollHeight` **完全不变**，
 行位置最大偏差 **9px**，DSH 的二分定位依然命中正确的行。
@@ -229,7 +306,9 @@ DSH 自己的「当前读到第几行」是拿 `getBoundingClientRect()` 做二�
 | `motion` | 行正在折叠 / 展开动画中（`data-chat-motion`）——此时行高在变 |
 | `virtualized` | 位于 DSH 已经虚拟化的表面内（轨迹页行不逐个打标记，改用静态规则） |
 | `hidden` | 行处于 `hidden` 状态 |
-| `streaming` | 思考正文还在流式输出——此时改用 `contain: layout`（见下一节） |
+
+> 思考正文还在流式输出时并不计入 `skipReasons`：它根本不进打标记的流程，改由静态的
+> `contain: layout` 规则保护（见上一节）。`report().chunks` 为 0 才是这个状态的信号。
 `content-visibility` 只在行**离屏**时生效；行在视口内时没有任何 containment，所以行内的 sticky
 折叠头、代码块横幅都能正常工作（实测两种模式的截图与几何完全一致）。真正的风险是**占位高度过期**：
 行内容变高（展开思考过程、展开工具输出）后，`--sb-h` 必须跟着更新，否则这行滚出视野再滚回来
@@ -242,14 +321,15 @@ DSH 自己的「当前读到第几行」是拿 `getBoundingClientRect()` 做二�
 
 | 层 | 做什么 | 关键点 |
 | --- | --- | --- |
-| A. 离屏跳过（核心） | 给长列表的直接子行加 `content-visibility: auto` + `contain-intrinsic-size` | 先确定真实行高写入 `--sb-h`，再打标记；不改变可见区域 |
-| B. 容器提示 | 给面积最大的最多 8 个滚动容器加 `will-change: scroll-position` | 只加属性，不每帧写 DOM |
+| A. 离屏跳过（核心） | 给长列表的直接子行加 `content-visibility: auto` + `contain-intrinsic-size` | 先把真实行高写成字面量，再打标记；不改变可见区域 |
+| B. 容器提示 | 给面积最大的最多 8 个滚动容器加 `will-change: scroll-position` | 只加属性，不每帧写 DOM；可用 `setPixelSafe(true)` 关掉（这是唯一会改像素的一层） |
 | C. 空闲调度 | `requestIdleCallback` 分片扫描，每片约 8ms | 滚动期间暂停扫描/测量，滚动结束后继续 |
 | D. 增量维护 | `MutationObserver` 监听 `childList` + 少量关键属性，50ms 去抖 | 新消息到达后只补新增行，不重扫全页 |
 | E. 首屏快扫（0.2.0） | 视图挂载后下一帧只标记视口上下 1.5 屏内的行 | 上限 120 行 / 300 次 rect 读，剩下的交给空闲分片 |
 | F. 块级跳过（0.5.0） | 长思考正文按直接块子元素加 `content-visibility`，高度先实测再钉 | 只碰 `[data-markdown-variant="compact"]`；只在正文落定后打标记 |
 | G. 步级跳过（0.6.0） | PTC 过程组按 step 跳过：一组一个盒子，而不是几十个段落 | 认 `[data-step-process-content][data-chat-flow]` 的直接子节点；组外仍走 F 层兜底 |
 | H. 流式 containment（0.6.0） | 正文还在流式增长时只加 `contain: layout` | 不打跳过标记、不钉高，等正文落定再交给 F / G |
+| I. 生命周期与缓存（0.7.1） | bfcache 暂停/恢复、失联表面剪枝、resize 从观察条目取值 | 这些都只在「缓存已经错了」时触发；稳态下不增加每帧成本 |
 
 扫描顺序是：表面发现 → 候选容器 → 行列表 → 逐行测量/标记。每一步都按空闲时间分片，避免启动时产生长任务。
 首屏快扫是例外：它只跑一帧、只碰近端行，用来把「第一次可见帧就已经被优化」从几百毫秒提前到十几毫秒。
@@ -277,13 +357,13 @@ dsh plugin --profile desktop add ".\dsh-scroll-boost"
 
 ```powershell
 npm pack
-dsh plugin --profile desktop add ".\dsh-scroll-boost-0.6.0.tgz"
+dsh plugin --profile desktop add ".\dsh-scroll-boost-0.7.1.tgz"
 ```
 
 ### 方式四：从 Releases 下载
 
 每个版本在 [Releases](https://github.com/TWFU-wcy/dsh-scroll-boost/releases) 都有更新说明，
-最新版为 [v0.6.0](https://github.com/TWFU-wcy/dsh-scroll-boost/releases/tag/v0.6.0)。
+最新版为 [v0.7.1](https://github.com/TWFU-wcy/dsh-scroll-boost/releases/tag/v0.7.1)。
 
 ### 安装后确认
 
@@ -301,12 +381,13 @@ window.__scrollBoost.report()
 
 ```js
 {
-  version: "0.6.0",
+  version: "0.7.1",
   enabled: true,
   containers: 1,
   hinted: 1,
   rows: 599,
   marked: 599,
+  pixelSafe: false,
   skipped: 2,
   scans: 1,
   lastScanMs: 103,
@@ -319,13 +400,15 @@ window.__scrollBoost.report()
     { id: "chat-flow", kind: "rows", rows: 600, marked: 599 },
     { id: "conversation-scroll", kind: "hint", rows: 0, marked: 0 }
   ],
-  skipReasons: { sticky: 2 },
+  skipReasons: { motion: 2 },
   pending: false
 }
 ```
 
 > `surfaces` 是 0.3.0 新增的：如果 DSH 改了内部结构，这里能直接看出插件认出了哪些界面、
-> 认错了多少行（`marked` 小于 `rows` 的部分通常是被护栏跳过的）。
+> 认错了多少行（`marked` 小于 `rows` 的部分通常是被护栏跳过的）。0.7.1 起离开文档的表面
+> 会被剪掉，所以这个数组只反映当前存活的界面。
+> `pixelSafe` 是 0.7.1 新增的：为 `true` 时 `hinted` 恒为 0，画面逐像素一致。
 > `chunks` / `chunkRoots` 是 0.5.0 新增的：展开一条长思考过程后它们应当大于 0，
 > 说明跳过已经生效（0.6.0 起 PTC 过程的每个 step 也计入 `chunks`）；如果一直是 0，
 > 多半是正文还在流式输出。
@@ -337,6 +420,7 @@ window.__scrollBoost.report();   // 查看统计
 window.__scrollBoost.disable();  // 立即恢复 DOM（移除所有标记与样式）
 window.__scrollBoost.enable();   // 重新启用
 window.__scrollBoost.scanNow();  // 手动触发一次空闲扫描
+window.__scrollBoost.setPixelSafe(true);  // 关掉 will-change 提示，换取逐像素一致的画面
 window.__scrollBoost.destroy();  // 彻底卸载当前实例
 ```
 
@@ -388,7 +472,9 @@ LCD 子像素抗锯齿切换到灰度抗锯齿——几何位置、行高、`scr
 会差几万个像素**（实测 73926 个，幅度集中在 17–64，无任何位移）。
 
 这是 A/B 两层共同的既有行为，从 0.1.0 起就在；块级跳过（F 层）本身经隔离对照验证是 **diff = 0**。
-如果更看重"逐像素一致"而不是滚动帧率，可以只用 A+F 两层：删掉 `applyHints()` 里的容器标记即可。
+如果更看重"逐像素一致"而不是滚动帧率，执行 `window.__scrollBoost.setPixelSafe(true)`——
+它会让 B 层整体停用（容器不再加 `will-change`），A / F / G 三层照常工作。这是一个运行时开关，
+不需要改代码，也不需要重启 DSH。
 
 ## 开发与测试
 
@@ -399,8 +485,8 @@ npm test
 ```
 
 `npm test` 会做语法检查、插件元信息检查（`locale` 字典与 `icon` 约束）、
-回归测试（表面识别、护栏跳过、行高真值复用、轨迹页静态规则、思考正文分块、PTC 步级分块、
-流式 containment 与流式保护）
+回归测试（表面识别、护栏跳过、行高真值复用与字面量钉高、轨迹页静态规则、思考正文分块、
+PTC 步级分块、流式 containment 与流式保护、像素一致开关、失效表面剪枝）
 和 jsdom 冒烟测试（20 行列表、新增行、disable/enable、cleanup）。
 
 浏览器侧的真实回归（需要本机装有 Edge）：
@@ -413,6 +499,8 @@ npm run test:browser
   检查首屏标记时机、粘性横幅行是否被跳过、滚动口是否被提示；
 - `probe-drift.html`：对比标记前后的每行位置与 `scrollHeight`，
   确认占位高度没有让 DSH 的行定位落到错误的行；
+- `probe-height.html`：核对每一行真正写进 `contain-intrinsic-size` 的数值（内容盒，已扣除
+  padding / border）与 `--sb-h` 是否一致，确认字面量钉高没有引入累积漂移；
 - `probe-traj-plugin.html`：复刻 DSH 轨迹表（2000 行、每帧重建 46 行），
   对比安装前后的每帧耗时、行高与 `scrollHeight`，并核对静态规则是否命中
   普通行、是否避开 turn-start / 边界行 / 请求行 / 折叠行；

@@ -6,3 +6,22 @@ Thumbs.db
 test/debug.cjs
 .archify/
 .local/
+
+# Scratch output from market/catalog tooling that is not part of the plugin.
+# Anchored to the repo root on purpose: locale/en.json must keep working.
+/*.mjs
+/build.yml
+/cat.json
+/catalog.json
+/catv.json
+/cm.json
+/ent.json
+/idx.json
+/pg1.json
+/pp.json
+/rel.json
+/repo.json
+/s.json
+/sc.json
+/tpl.html
+/v061.json

@@ -123,6 +123,36 @@ const scroller = document.getElementById('scroller')
 Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 600 })
 Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1400 })
 
+// jsdom has no ResizeObserver. The plugin uses it to keep a pinned height in
+// step with the real box, and the fix under test is that it answers from the
+// observer entry instead of forcing layout. Install a controllable stand-in
+// so a resize can be delivered exactly the way a browser delivers one.
+let resizeCallback = null
+window.ResizeObserver = class {
+  constructor(cb) { resizeCallback = cb }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+// Deliver one resize the way a browser does: the entry carries contentRect,
+// and reading getBoundingClientRect from inside the callback would be a
+// forced layout. Any rect read during delivery is recorded as a violation.
+let rectReadsDuringDispatch = 0
+function dispatchResize(el, contentHeight) {
+  if (!resizeCallback) return
+  const realRect = window.Element.prototype.getBoundingClientRect
+  window.Element.prototype.getBoundingClientRect = function () {
+    rectReadsDuringDispatch++
+    return realRect.apply(this, arguments)
+  }
+  try {
+    resizeCallback([{ target: el, contentRect: { height: contentHeight, width: 800 } }], {})
+  } finally {
+    window.Element.prototype.getBoundingClientRect = realRect
+  }
+}
+
 window.__ModuleLoader__ = {
   load({ id, factory }) {
     assert.equal(id, 'dsh-scroll-boost')
@@ -175,6 +205,41 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   expandedRow.querySelector('.body').setAttribute('data-expanded', '')
   await sleep(80)
   assert.equal(expandedRow.style.getPropertyValue('--sb-h'), '240px', 'an expanded row must re-measure its height')
+  assert.equal(
+    expandedRow.style.getPropertyValue('contain-intrinsic-size'),
+    'auto 240px',
+    'the placeholder must be the literal measured height, not a var()'
+  )
+
+  // 3d. A resize must be answered from the observer entry, not by measuring.
+  //     Reading geometry inside the callback is a forced synchronous layout,
+  //     and a width drag delivers one entry per observed row in the same
+  //     frame - so this is the difference between a smooth drag and a stutter.
+  rectReadsDuringDispatch = 0
+  dispatchResize(expandedRow, 260)
+  assert.equal(
+    rectReadsDuringDispatch,
+    0,
+    'a resize entry must be answered without reading layout'
+  )
+  assert.equal(
+    expandedRow.style.getPropertyValue('--sb-h'),
+    '260px',
+    'the entry contentRect is the new pinned height'
+  )
+  assert.equal(
+    expandedRow.style.getPropertyValue('contain-intrinsic-size'),
+    'auto 260px',
+    'the literal placeholder must follow the entry'
+  )
+  // The same entry delivered twice must not rewrite the placeholder.
+  const pinnedBefore = expandedRow.style.getPropertyValue('contain-intrinsic-size')
+  dispatchResize(expandedRow, 260)
+  assert.equal(
+    expandedRow.style.getPropertyValue('contain-intrinsic-size'),
+    pinnedBefore,
+    'an unchanged resize writes nothing'
+  )
 
   // 4. A row that is mid-animation is left alone too.
   const motionRow = turns.find((t) => t.getAttribute('data-chat-motion') === 'collapse')
@@ -318,6 +383,35 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   assert.ok(
     streamChunks.every((chunk) => chunk.hasAttribute('data-scrollboost-chunk')),
     'a settled body must be chunked after the stream ends'
+  )
+
+  // 6e. The compositor hint is opt-out: it is the only change the plugin makes
+  //     that is visible in a screenshot (grayscale instead of LCD text), so a
+  //     user who needs a byte-identical frame can turn it off.
+  assert.equal(window.__scrollBoost.report().pixelSafe, false)
+  assert.equal(scroller.hasAttribute('data-scrollboost-container'), true)
+  window.__scrollBoost.setPixelSafe(true)
+  assert.equal(scroller.hasAttribute('data-scrollboost-container'), false, 'pixel-safe mode must drop the hint')
+  assert.equal(window.__scrollBoost.report().hinted, 0)
+  window.__scrollBoost.setPixelSafe(false)
+  assert.equal(scroller.hasAttribute('data-scrollboost-container'), true, 'turning it back on restores the hint')
+
+  // 6f. A surface whose element left the document must not stay in the map:
+  //     otherwise switching views pins a detached subtree and inflates the
+  //     counters that report() shows.
+  const orphan = document.createElement('div')
+  orphan.setAttribute('data-summary-scroll-region', '')
+  document.body.appendChild(orphan)
+  await sleep(400)
+  const withOrphan = window.__scrollBoost.report()
+  assert.equal(withOrphan.surfaces.some((s) => s.id === 'summary-region'), true)
+  orphan.remove()
+  await sleep(400)
+  const withoutOrphan = window.__scrollBoost.report()
+  assert.equal(
+    withoutOrphan.surfaces.some((s) => s.id === 'summary-region'),
+    false,
+    'a surface that left the document must be pruned'
   )
 
   // 7. Heights survive a restart of the plugin: the second pass reuses the

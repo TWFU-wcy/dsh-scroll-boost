@@ -1,0 +1,142 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>scroll-boost-probe-drag</title>
+<!--
+  What a width drag costs: forced layouts AND frame budget, counted together.
+
+  A drag is a run of animation frames, each changing the width, reflowing,
+  running the row ResizeObserver and painting. Two things are measured:
+    - rect reads on marked rows (a forced synchronous layout each)
+    - frames over the 16.7ms budget
+
+  Run with ?rows=600 to change the shape.
+-->
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  [data-conversation-scroll] { height: 900px; overflow-y: auto; }
+  [data-slot="conversation.chat.flow"] { display: contents; }
+  .turn { padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
+  .turn .body { font: 14px/1.6 system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<div data-conversation-scroll id="scroller">
+  <div data-slot="conversation.chat.flow" id="flow"></div>
+</div>
+<script>
+  const params = new URLSearchParams(location.search);
+  const COUNT = parseInt(params.get("rows") || "600", 10);
+  const flow = document.getElementById("flow");
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < COUNT; i++) {
+    const turn = document.createElement("div");
+    turn.className = "turn";
+    turn.setAttribute("data-chat-flow-key", "node-" + i);
+    const body = document.createElement("div");
+    body.className = "body";
+    body.textContent = "turn " + i + " — " + "lorem ipsum dolor sit amet ".repeat(i % 4 + 1);
+    turn.appendChild(body);
+    frag.appendChild(turn);
+  }
+  flow.appendChild(frag);
+</script>
+<script>
+  window.__ModuleLoader__ = {
+    load({ factory }) { window.__plugin = factory(() => { throw new Error("unexpected require"); }); }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  const scroller = document.getElementById("scroller");
+  const column = scroller.parentElement || document.body;
+
+  let counting = false;
+  let rectReads = 0;
+  const realRect = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function () {
+    if (counting && this.hasAttribute &&
+        (this.hasAttribute("data-scrollboost-row") || this.hasAttribute("data-scrollboost-chunk"))) rectReads++;
+    return realRect.apply(this, arguments);
+  };
+
+  // One width change per animation frame, with a forced layout at the end of
+  // each frame - exactly what a paint costs.
+  function drag(frames, base, amplitude) {
+    return new Promise((resolve) => {
+      const times = [];
+      let i = 0;
+      let last = 0;
+      function step(now) {
+        if (i > 0 && last > 0) times.push(now - last);
+        last = now;
+        if (i >= frames) { resolve(times); return; }
+        const width = base + Math.round(Math.sin(i / 6) * amplitude);
+        column.style.width = width + "px";
+        column.style.setProperty("--dsh-chat-user-width", width + "px");
+        void scroller.scrollHeight;
+        i++;
+        requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    });
+  }
+
+  function summarize(times) {
+    const sorted = times.slice().sort((a, b) => a - b);
+    const sum = times.reduce((a, b) => a + b, 0);
+    return {
+      median: Math.round(sorted[Math.floor(sorted.length / 2)] * 100) / 100,
+      p95: Math.round(sorted[Math.floor(sorted.length * 0.95)] * 100) / 100,
+      max: Math.round(sorted[sorted.length - 1] * 100) / 100,
+      mean: Math.round((sum / times.length) * 100) / 100,
+      over25: times.filter((t) => t > 25).length,
+      over40: times.filter((t) => t > 40).length,
+      frames: times.length
+    };
+  }
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 900));
+  const post = (data) => {
+    const json = JSON.stringify(data);
+    document.body.setAttribute("data-harness", json);
+    fetch("/__result", { method: "POST", body: json }).catch(() => {});
+  };
+
+  async function measure() {
+    rectReads = 0;
+    counting = true;
+    const times = await drag(120, 700, 60);
+    counting = false;
+    const out = summarize(times);
+    out.rectReads = rectReads;
+    out.rectPerFrame = Math.round(rectReads / times.length * 10) / 10;
+    return out;
+  }
+
+  (async () => {
+    try {
+      const result = { rows: COUNT };
+      await settle();
+      result.noPlugin = await measure();
+      await settle();
+
+      window.__plugin.apply({ effect() {} });
+      await settle();
+
+      const report = window.__scrollBoost.report();
+      result.marked = document.querySelectorAll("[data-scrollboost-row]").length;
+      result.hinted = report.hinted;
+
+      result.withPlugin = await measure();
+      await settle();
+      result.withPluginAgain = await measure();
+      post(result);
+    } catch (error) {
+      post({ error: String(error && error.stack || error), rows: COUNT });
+    }
+  })();
+</script>
+</body>
+</html>
