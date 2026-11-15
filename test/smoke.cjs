@@ -58,8 +58,18 @@ Object.defineProperty(list, "scrollHeight", { configurable: true, value: 2000 })
 window.__ModuleLoader__ = {
   load({ id, factory }) {
     assert.equal(id, "dsh-scroll-boost");
-    window.__testExports = factory(() => {
-      throw new Error("unexpected require");
+    // A minimal React stand-in: this test is about the engine, and letting the
+    // settings page warn here would bury a real warning in expected noise.
+    window.__testExports = factory((spec) => {
+      if (spec === "react") {
+        return {
+          createElement: () => null,
+          useState: (initial) => [typeof initial === "function" ? initial() : initial, () => {}],
+          useEffect: () => {},
+          useRef: (initial) => ({ current: initial })
+        };
+      }
+      throw new Error("unexpected require: " + spec);
     });
   }
 };
@@ -67,10 +77,23 @@ window.__ModuleLoader__ = {
 window.eval(source);
 const plugin = window.__testExports;
 assert.equal(typeof plugin.apply, "function");
-assert.equal(Array.isArray(plugin.inject) && plugin.inject.length, 0);
+// `slots` must be declared: Cordis only projects a service onto `ctx` when the
+// plugin asks for it, and the settings page needs `ctx.slots`. Declaring an
+// empty inject was the bug that made the settings page silently absent.
+assert.ok(Array.isArray(plugin.inject), "inject must be an array");
+assert.ok(
+  plugin.inject.includes("slots"),
+  "inject must declare 'slots' so the settings page can register"
+);
 
 let cleanup = null;
 plugin.apply({
+  // `slots` is what the plugin declares in inject, so it is present here; the
+  // settings page registers against it. The engine itself does not need it.
+  slots: {
+    inject(owner, cb) { cb(); return () => {}; },
+    register() { return () => {}; }
+  },
   effect(fn) {
     // Cordis runs the effect body immediately and keeps its return value as
     // the disposer.

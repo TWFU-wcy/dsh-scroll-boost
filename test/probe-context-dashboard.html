@@ -1,0 +1,217 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>probe-context-dashboard</title>
+<!--
+  Does the plugin stay out of another plugin's page?
+
+  0.7.x guessed at row lists across the whole document. dsh-context's dashboard
+  was the case that hurt: its scroll port is `.lc-ov-pagescroll` (the class
+  contains "scroll", so it matched the candidate selector), the port wraps a
+  single `.lc-ov-pagecontent`, and that box holds a page head, cards, a session
+  grid and a pager. The grid's cards looked exactly like transcript rows, so
+  each one was pinned to its first measured height.
+
+  The dashboard re-lays those cards out on every filter and range change, so a
+  stale pin is paid for on every scroll - that was the reported stutter.
+
+  This fixture reproduces the real markup and CSS shape (cards in an auto-fill
+  grid, a page head of variable height, a pager) and asserts on a real browser:
+
+    1. no card, no grid and no content box carries a scrollboost attribute;
+    2. the dashboard scroll port gets no compositor hint either;
+    3. the plugin still optimizes a conversation that is on the same page;
+    4. scrolling the dashboard does not make the plugin mark anything.
+
+  `?plain=1` renders the same page without the plugin, so a screenshot pair can
+  be diffed pixel by pixel: the plugin must not change a single pixel here.
+-->
+<style>
+  html, body { margin: 0; height: 100%; font: 13px/1.5 system-ui, sans-serif; background: #fff; color: #222; }
+
+  /* The plugin's own conversation surface, on the same page. */
+  #column { display: flex; flex-direction: column; height: 46vh; border-bottom: 2px solid #ccc; }
+  #scroller { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px; }
+  #flow { display: contents; }
+  .turn { min-width: 0; padding: 8px 0; border-bottom: 1px solid #eee; }
+  .turn-body { height: 88px; }
+
+  /* dsh-context's dashboard: the class names and the layout rules come from
+     its shipped client bundle. */
+  .lc-root { height: 54vh; box-sizing: border-box; }
+  .lc-ov-page { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  .lc-ov-pagescroll { scrollbar-gutter: stable; flex: auto; min-height: 0; overflow-y: auto; }
+  .lc-ov-pagecontent { padding: 0 10px 10px; }
+  .lc-ov-pagehead { flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 24px; padding-top: 28px; display: flex; }
+  .lc-ov-pagetitle { margin: 0 8px 0 0; font-size: 20px; font-weight: 500; line-height: 28px; }
+  .lc-card { background: #fff; border: 1px solid #e3e5e9; border-radius: 10px; padding: 10px 12px; }
+  .lc-ov-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
+  .lc-ov-tile { height: 176px; box-sizing: border-box; }
+  .lc-ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+  .lc-ov-session { box-sizing: border-box; height: 174px; text-align: left; background: #fff;
+    border: 1px solid #e3e5e9; border-radius: 10px; padding: 10px; }
+  .lc-ov-pager { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 10px 0; }
+</style>
+</head>
+<body>
+<div id="column" data-conversation-content>
+  <div id="scroller" data-conversation-scroll>
+    <div id="flow" data-slot="conversation.chat.flow"></div>
+  </div>
+</div>
+
+<div class="lc-root">
+  <div class="lc-ov-page">
+    <div class="lc-ov-pagescroll" id="dash">
+      <div class="lc-ov-pagecontent" id="dashContent">
+        <div class="lc-ov-pagehead">
+          <h1 class="lc-ov-pagetitle">上下文洞察</h1>
+        </div>
+        <div class="lc-ov-tiles">
+          <div class="lc-card lc-ov-tile">kpi 1</div>
+          <div class="lc-card lc-ov-tile">kpi 2</div>
+        </div>
+        <div class="lc-ov-grid" id="dashGrid"></div>
+        <div class="lc-ov-pager">
+          <button type="button">‹</button><span>1 / 6</span><button type="button">›</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.__ModuleLoader__ = {
+    load({ id, factory }) {
+      window.__plugin = factory(() => { throw new Error("unexpected require"); });
+      window.__pluginId = id;
+    }
+  };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+  const flow = document.getElementById("flow");
+  const scroller = document.getElementById("scroller");
+  const dash = document.getElementById("dash");
+  const dashGrid = document.getElementById("dashGrid");
+
+  // A conversation long enough that the plugin has real work to do here: this
+  // is the control group. If the plugin stops optimizing this too, the probe
+  // proves nothing about the dashboard.
+  for (let i = 0; i < 40; i++) {
+    const row = document.createElement("div");
+    row.className = "turn";
+    row.setAttribute("data-chat-flow-key", "turn-" + i);
+    row.innerHTML = '<div class="turn-body">turn ' + i + "</div>";
+    flow.appendChild(row);
+  }
+
+  // 60 session cards, one grid page worth.
+  for (let i = 0; i < 60; i++) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "lc-ov-session";
+    card.textContent = "session " + i;
+    dashGrid.appendChild(card);
+  }
+
+  const PLAIN = new URLSearchParams(location.search).has("plain");
+
+  // Frame-cost sampling: scroll the dashboard for N frames and record how much
+  // main-thread time each frame's work costs. A stale pinned height shows up as
+  // layout work on frames that visually changed nothing.
+  function scrollFrames(frames) {
+    return new Promise((resolve) => {
+      const samples = [];
+      let last = performance.now();
+      let i = 0;
+      const max = dash.scrollHeight - dash.clientHeight;
+      function step() {
+        const now = performance.now();
+        samples.push(now - last);
+        last = now;
+        dash.scrollTop = Math.round((max * i) / frames);
+        if (++i > frames) {
+          samples.sort((a, b) => a - b);
+          resolve({
+            median: Math.round(samples[Math.floor(samples.length / 2)] * 100) / 100,
+            p95: Math.round(samples[Math.floor(samples.length * 0.95)] * 100) / 100,
+            longFrames: samples.filter((t) => t > 25).length,
+            frames: samples.length
+          });
+          return;
+        }
+        requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    });
+  }
+
+  // Push the dashboard through the re-layout its filters trigger: the page head
+  // changes height and the grid reflows. Any pinned placeholder that survived
+  // into this state is the bug this fixture exists to catch.
+  function churnDashboard() {
+    const head = document.querySelector(".lc-ov-pagehead");
+    head.style.paddingBottom = head.style.paddingBottom === "80px" ? "0px" : "80px";
+    dashGrid.style.gridTemplateColumns = dashGrid.style.gridTemplateColumns === "minmax(0, 1fr)"
+      ? "" : "minmax(0, 1fr)";
+  }
+
+  setTimeout(async () => {
+    if (!PLAIN) window.__plugin.apply({ effect() {} });
+
+    // Give the plugin's fast pass and first idle slices time to land.
+    await new Promise((r) => setTimeout(r, 900));
+
+    const report = PLAIN ? null : window.__scrollBoost.report();
+
+    const marks = {
+      grid: dashGrid.hasAttribute("data-scrollboost-row"),
+      content: document.getElementById("dashContent").hasAttribute("data-scrollboost-row"),
+      cards: document.querySelectorAll(".lc-ov-session[data-scrollboost-row]").length,
+      cardsPinned: Array.from(document.querySelectorAll(".lc-ov-session"))
+        .filter((c) => c.style.getPropertyValue("contain-intrinsic-size")).length,
+      dashHinted: dash.hasAttribute("data-scrollboost-container"),
+      chatRows: document.querySelectorAll('[data-chat-flow-key][data-scrollboost-row]').length,
+      chatHinted: scroller.hasAttribute("data-scrollboost-container")
+    };
+
+    const framesBefore = await scrollFrames(60);
+    for (let k = 0; k < 4; k++) {
+      churnDashboard();
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    const framesAfter = await scrollFrames(60);
+
+    // Anything that appeared while the dashboard was being scrolled is a bug.
+    const marksAfterScroll = {
+      cards: document.querySelectorAll(".lc-ov-session[data-scrollboost-row]").length,
+      grid: dashGrid.hasAttribute("data-scrollboost-row"),
+      dashHinted: dash.hasAttribute("data-scrollboost-container")
+    };
+
+    const result = {
+      version: report ? report.version : null,
+      plain: PLAIN,
+      marks,
+      marksAfterScroll,
+      surfaces: report ? report.surfaces : [],
+      frames: { before: framesBefore, after: framesAfter },
+      pass: marks.cards === 0 &&
+        marks.grid === false &&
+        marks.content === false &&
+        marks.cardsPinned === 0 &&
+        marks.dashHinted === false &&
+        marksAfterScroll.cards === 0 &&
+        marksAfterScroll.grid === false &&
+        marksAfterScroll.dashHinted === false &&
+        (PLAIN || marks.chatRows >= 30)
+    };
+
+    document.body.setAttribute("data-harness", JSON.stringify(result));
+    fetch("/__result", { method: "POST", body: JSON.stringify(result) }).catch(() => {});
+  }, 100);
+</script>
+</body>
+</html>

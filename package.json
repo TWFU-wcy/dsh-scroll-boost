@@ -1,7 +1,7 @@
 {
   "name": "dsh-scroll-boost",
-  "version": "0.7.2",
-  "description": "Client-side scroll performance booster for the DeepSeek Harness web GUI: DSH-aware surface detection, offscreen row skipping with real height truth, step-level chunking for long PTC reasoning groups and block-level chunking elsewhere, compositor hints, idle scanning and incremental maintenance — no visual changes and no plugin removals.",
+  "version": "0.8.0",
+  "description": "Client-side scroll performance booster for the DeepSeek Harness web GUI: DSH-aware surface detection, offscreen row skipping with real height truth, step-level chunking for long PTC reasoning groups and block-level chunking elsewhere, compositor hints, idle scanning and incremental maintenance — plus a per-page opt-out so any page that scrolls worse can be switched off without uninstalling.",
   "icon": "./icon.svg",
   "type": "module",
   "main": "lib/index.js",
@@ -34,7 +34,7 @@
     "dsh": ">=0.2.0-rc.1"
   },
   "scripts": {
-    "test": "node --check lib/index.js && node --check lib/client.js && node test/meta.cjs && node test/regression.cjs && node test/smoke.cjs",
+    "test": "node --check lib/index.js && node --check lib/client.js && node test/meta.cjs && node test/regression.cjs && node test/smoke.cjs && node test/exclude.cjs && node test/panel.cjs",
     "test:browser": "node test/run-harness.cjs harness-chat.html && node test/run-harness.cjs probe-drift.html && node test/run-harness.cjs probe-height.html && node test/run-harness.cjs probe-resize-plugin.html && node test/run-harness.cjs probe-traj-plugin.html && node test/run-harness.cjs probe-chunk-plugin.html && node test/run-harness.cjs probe-ptc.html && node test/run-harness.cjs probe-stream-plugin.html"
   },
   "devDependencies": {

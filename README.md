@@ -349,6 +349,13 @@ window.__scrollBoost.report()
 
 ```js
 window.__scrollBoost.report();   // 查看统计
+window.__scrollBoost.catalog();  // 能力清单：7 项界面，含是否在当前页
+window.__scrollBoost.scopes();   // 当前在管的滚动容器（含 key 与行数）
+window.__scrollBoost.discoverAll();  // 当前页面全部可加速项，已开启的在前
+window.__scrollBoost.excludeKind(id); // 按界面类型关掉（对没打开的页面也有效）
+window.__scrollBoost.includeKind(id); // 按界面类型恢复
+window.__scrollBoost.exclude(key);    // 按容器关掉，永久生效
+window.__scrollBoost.include();       // 恢复被排除的容器（可传单个 key）
 window.__scrollBoost.disable();  // 立即恢复 DOM（移除所有标记与样式）
 window.__scrollBoost.enable();   // 重新启用
 window.__scrollBoost.scanNow();  // 手动触发一次空闲扫描
@@ -391,13 +398,121 @@ DSH 的插件列表从 `locale/<语言>.json` 读取显示文案（`meta.title` 
   但插件会保留通用回退路径，且 `report().surfaces` 能直接看出当前认出了什么。
 - **不降低内存和加载时间**：DOM 节点仍在，只是离屏行不参与渲染。
 - **特殊布局可能误判**：嵌套行列表、绝对定位虚拟列表、`display: table-*`、sticky/fixed 行会被跳过
-  或只标记部分行。
+  或只标记部分行。**这类页面请用 `exclude()` 单独关掉**，见下一节。
 - **Ctrl+F / 无障碍**：`content-visibility: auto` 的离屏内容仍可被浏览器查找；但极端情况下屏幕阅读器
   对「尚未渲染」的内容行为可能不同，遇到问题可 `disable()`。
 - **GPU 内存**：`will-change` 只在最多 8 个最大容器上使用；现代 Chromium 对 `scroll-position` 通常
   不直接建整层，实测净增通常 0–50MB，远低于 8GB 显卡压力。
 
-### 代价：`will-change` 会改变文字抗锯齿
+## 设置页：看清它在做什么，并按需关掉
+
+侧栏进入 **设置** → **Scroll Boost**。这一页有两个用途：告诉你插件擅长优化什么，以及让你单独
+关掉某一处。
+
+### 上半部分：这个插件会优化哪些界面（常驻能力清单）
+
+**不需要真的打开那些页面。** 下面 7 项是插件认得的所有界面，打开设置页就能看到：
+
+| 界面 | 插件在这里做什么 |
+| --- | --- |
+| 聊天记录 | 让屏幕外的消息不参与布局和绘制。长会话里收益最大的一处 |
+| 会话滚动区 | 提示浏览器把滚动容器单独提升一层，少一次合成 |
+| 轨迹面板 | 跳过屏幕外的内容单元格 |
+| 摘要预览 | 不做跳过，只用来在滚动它时暂停后台扫描 |
+| 输入框 | 同上 |
+| 审批面板 | 同上 |
+| 提问面板 | 同上 |
+
+每项标注「**本页**」或「**不在此页**」，所以你能一眼看出哪些正在生效、哪些只是“如果去那个页面
+就会生效”。**每一项右侧都有开关**——即使那一页当前没打开，也能直接关掉。
+
+清单的代价极低：只做 7 次 `querySelector`，**零次布局读取**，所以每次打开设置页都会列出来。
+
+### 下半部分：当前页面的检测结果
+
+点右上角 **重新检测** 会扫一遍整个文档，把当前页面里**所有**能加速的地方列成表，按「已开启优先、
+折叠内容多的优先」排序。关掉的沉到下面但不会消失。
+
+这一层是**快照**，不会自己跳动——读的时候行不会在你眼皮底下换位置。
+
+> 两个区域的开关控制的层级不同：**清单**关掉的是「这一类界面」，**下表**关掉的是「这一个容器」。
+> 清单项的名称显示为「本页」时，两处都会出现。
+
+### 可读性
+
+| 显示 | 说明 |
+| --- | --- |
+| 「聊天记录」「输入框」 | 人话名称，**不是 `div.lc-root` 这种类名** |
+| 「已折叠 42 条内容」 | 实际在做多少事 |
+| 「加速中 / 已关闭」 | 状态 |
+| **技术信息 ▸** | 识别标识（key）藏在这里，默认不显示 |
+
+界面语言在页面内切换：**中文 / English**，**默认中文**，选过会记住。设置列表里的条目名固定为
+**Scroll Boost**，不随页面语言变化——这样切语言后你还找得到它。
+
+### 命令行等价操作
+
+面板只是这组 API 的图形外壳，两者完全等价：
+
+```js
+// 能力清单（7 项，含是否在当前页）
+window.__scrollBoost.catalog()
+
+// 按「界面类型」开关 —— 对没打开的页面也有效
+window.__scrollBoost.excludeKind("trajectory")
+window.__scrollBoost.includeKind("trajectory")
+
+// 按「具体容器」开关
+window.__scrollBoost.discoverAll()          // 当前页面全部可加速项，已开启的在前
+window.__scrollBoost.exclude(key)
+window.__scrollBoost.include(key)
+```
+
+`discoverAll()` 每一项长这样：
+
+```js
+{
+  key: "div.chat-scroll > div.column > #flow",
+  tag: "div", rows: 599, hinted: true, excluded: false,
+  surfaces: ["chat-flow", "conversation-scroll"], area: 921600
+}
+```
+
+`rows` 大于 0 就是「插件在这个页面里钉了多少行」。`surfaces` 告诉你它对应清单里的哪一项。
+
+### 关掉之后会发生什么
+
+立刻、彻底：该范围内的行标记、钉死高度、`--sb-h` 读数、合成提示、思考正文分块标记全部移除——
+**和没装插件一模一样**，而其它界面照常优化。
+
+选择写在 `localStorage`：
+
+| 键 | 存什么 |
+| --- | --- |
+| `dsh-scroll-boost.excluded.v1` | 按容器关掉的 key |
+| `dsh-scroll-boost.excludedKinds.v1` | 按界面类型关掉的 id |
+
+重启 DSH 仍然有效。
+
+### key 是怎么算的
+
+`key` 是「从 `<body>` 到该滚动容器」的一串标签名 + 排序后的 class 特征，例如
+`div.market-scroll > div.grid`。它不用自动生成的 id，因为 id 每次渲染都可能变，那样你的排除会在
+重载后悄悄失效。
+
+如果 DSH 或那个插件改了页面的层级，`key` 会变，旧的排除记录就匹配不上了——这时候重新跑一次
+`discoverAll()` 拿新的 `key` 即可。`report().excluded` 里能看到当前生效的所有 key。
+
+注意「按界面类型」的开关不受这个影响：它记的是 `trajectory`、`chat-flow` 这样的表面 id，与页面
+层级无关，所以布局改版也不会失效。这也是为什么清单区的开关更耐用。
+
+### 什么时候该用它
+
+- 某个页面**装插件后**明显更卡（注意是「装后 vs 装前」的对比，不是「一直就卡」）；
+- 某个页面的卡片高度由内容决定、并且会随筛选/展开而变；
+- 你只想保住聊天页的收益，不想承担其它页面的不确定性。
+
+## 代价：`will-change` 会改变文字抗锯齿
 
 B 层给滚动口加 `will-change: scroll-position`，会把该容器提升为独立合成层。层内的文字因此从
 LCD 子像素抗锯齿切换到灰度抗锯齿——几何位置、行高、`scrollHeight` 全都不变，但**同一位置的截图会差
@@ -415,10 +530,15 @@ npm install
 npm test
 ```
 
-`npm test` 会做语法检查、插件元信息检查（`locale` 字典与 `icon` 约束）、回归测试（表面识别、护栏
-跳过、行高真值复用与字面量钉高、轨迹页静态规则、思考正文分块、PTC 步级分块、流式 containment 与
-流式保护、像素一致开关、失效表面剪枝、resize 不读取布局）和 jsdom 冒烟测试（20 行列表、新增行、
-disable/enable、cleanup）。
+`npm test` 会做语法检查、插件元信息检查（`locale` 字典与 `icon` 约束）、回归测试、冒烟测试、
+排除机制测试和设置面板测试。
+
+设置面板测试（`test/panel.cjs`）用一个最小的 React 替身，验证：注册形状符合
+`settings.section` 的声明、设置项显示名是 **Scroll Boost** 且不以 `dsh-` 开头、**引擎不在时渲染
+不抛异常**（抛异常会让整个插槽条目变空白，这是宿主文档点名的失败模式）、默认视图里**不含任何
+CSS 选择器或属性名**、语言切换（默认中文 → 跟随宿主 → 记住手动选择）、能力清单里**未挂载的
+界面也会列出**（轨迹面板是兜底例子）、按界面类型开关的完整往返（含持久化与未知 id 拒绝）、
+以及「关掉 → 恢复」后标记确实清空且重扫不再标回。
 
 浏览器侧的真实回归（需要本机装有 Edge）：
 

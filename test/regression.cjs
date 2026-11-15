@@ -156,7 +156,19 @@ function dispatchResize(el, contentHeight) {
 window.__ModuleLoader__ = {
   load({ id, factory }) {
     assert.equal(id, 'dsh-scroll-boost')
-    window.__testExports = factory(() => { throw new Error('unexpected require') })
+    // A minimal React stand-in keeps the settings-page path quiet: this test is
+    // about surfaces and guards, and a warning from here would mask a real one.
+    window.__testExports = factory((spec) => {
+      if (spec === 'react') {
+        return {
+          createElement: () => null,
+          useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+          useEffect: () => {},
+          useRef: (initial) => ({ current: initial })
+        }
+      }
+      throw new Error('unexpected require: ' + spec)
+    })
   }
 }
 
@@ -166,6 +178,10 @@ assert.equal(typeof plugin.apply, 'function')
 
 let cleanup = null
 plugin.apply({
+  slots: {
+    inject(owner, cb) { cb(); return () => {} },
+    register() { return () => {} }
+  },
   effect(fn) { cleanup = fn() }
 })
 
